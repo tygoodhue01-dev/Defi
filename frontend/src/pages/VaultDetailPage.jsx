@@ -113,6 +113,7 @@ export default function VaultDetailPage() {
   const handleActionComplete = () => {
     refetchUserShares();
     refetchUserLp();
+    refetchAssets();
     refreshMetrics();
   };
 
@@ -162,7 +163,7 @@ export default function VaultDetailPage() {
   }
 
   const formattedPricePerShare = pricePerShare ? formatFromWei(pricePerShare.toString()) : metrics?.pricePerShare || '1';
-  const formattedTotalSupply = totalSupply ? formatFromWei(totalSupply.toString()) : '0';
+  const formattedTotalAssets = totalAssets ? formatFromWei(totalAssets.toString()) : '0';
   const formattedUserShares = userShares ? formatFromWei(userShares.toString()) : '0';
   const formattedUserLp = userLpBalance ? formatFromWei(userLpBalance.toString()) : '0';
 
@@ -339,7 +340,7 @@ export default function VaultDetailPage() {
               <CardTitle>Vault Info</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              <InfoRow label="Total Supply" value={`${formattedTotalSupply} shares`} mono />
+              <InfoRow label="Total Assets" value={`${formattedTotalAssets}`} mono />
               <InfoRow label="Token 0" value={vault.token0} />
               <InfoRow label="Token 1" value={vault.token1} />
               <InfoRow label="Reward Token" value={vault.rewardToken} />
