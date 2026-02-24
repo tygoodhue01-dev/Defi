@@ -8,6 +8,7 @@ import { chainNames } from '@/lib/wagmi';
 
 export function VaultCard({ vault, metrics }) {
   const isPaused = vault.paused;
+  const isExperimental = vault.experimental;
   
   return (
     <Link to={`/vaults/${vault.id}`} data-testid={`vault-card-${vault.id}`}>
@@ -33,16 +34,23 @@ export function VaultCard({ vault, metrics }) {
               </div>
             </div>
             <div className="flex flex-col items-end gap-1">
-              {isPaused ? (
-                <Badge variant="destructive" className="gap-1">
-                  <Pause className="w-3 h-3" />
-                  Paused
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/30">
-                  Active
-                </Badge>
-              )}
+              <div className="flex gap-1">
+                {isPaused ? (
+                  <Badge variant="destructive" className="gap-1">
+                    <Pause className="w-3 h-3" />
+                    Paused
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary" className="bg-green-500/20 text-green-400 border-green-500/30">
+                    Active
+                  </Badge>
+                )}
+                {isExperimental && (
+                  <Badge variant="outline" className="border-yellow-500/50 text-yellow-400 bg-yellow-500/10">
+                    Beta
+                  </Badge>
+                )}
+              </div>
               <span className="text-xs text-muted-foreground">
                 {chainNames[vault.chainId] || `Chain ${vault.chainId}`}
               </span>
