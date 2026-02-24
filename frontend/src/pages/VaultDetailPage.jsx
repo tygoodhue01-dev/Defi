@@ -48,14 +48,14 @@ export default function VaultDetailPage() {
   const { data: pricePerShare, refetch: refetchPrice } = useReadContract({
     address: vault?.vaultAddress,
     abi: VAULT_ABI,
-    functionName: 'getPricePerFullShare',
+    functionName: 'pricePerShare',
     query: { enabled: !!vault?.vaultAddress },
   });
 
-  const { data: totalSupply, refetch: refetchSupply } = useReadContract({
+  const { data: totalAssets, refetch: refetchAssets } = useReadContract({
     address: vault?.vaultAddress,
     abi: VAULT_ABI,
-    functionName: 'totalSupply',
+    functionName: 'totalAssets',
     query: { enabled: !!vault?.vaultAddress },
   });
 
