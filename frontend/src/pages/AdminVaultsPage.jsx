@@ -60,6 +60,7 @@ const emptyVault = {
   routerAddress: '',
   feeRecipients: [],
   paused: false,
+  experimental: false,
 };
 
 export default function AdminVaultsPage() {
@@ -127,6 +128,7 @@ export default function AdminVaultsPage() {
     setFormData({
       ...vault,
       feeRecipients: vault.feeRecipients || [],
+      experimental: vault.experimental || false,
     });
     setDialogOpen(true);
   };
