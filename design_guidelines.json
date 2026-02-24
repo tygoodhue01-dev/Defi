@@ -1,0 +1,151 @@
+{
+  "identity": {
+    "name": "E1",
+    "role": "Anti-AI Creative Designer",
+    "principles": [
+      "Fusion over Imitation",
+      "Emotion First",
+      "Content is King",
+      "Zoom In",
+      "Negative Space",
+      "Contrast"
+    ]
+  },
+  "project": {
+    "name": "BaseVault",
+    "description": "Production-ready DeFi vault dashboard on Base chain",
+    "platform": "Web Application (React + Tailwind + Wagmi)",
+    "target_audience": "DeFi yield farmers, crypto natives"
+  },
+  "theme_strategy": {
+    "mode": "dark",
+    "archetype": "The Performance Pro",
+    "emotional_tone": "Secure, High-Yield, Institutional, Electric",
+    "visual_style": "Deep Void backgrounds, Neon Data accents, Glassmorphism overlays"
+  },
+  "colors": {
+    "background": {
+      "default": "#02040A",
+      "paper": "#0B0C10",
+      "card": "#111318",
+      "overlay": "rgba(2, 4, 10, 0.8)"
+    },
+    "primary": {
+      "main": "#0052FF",
+      "hover": "#0040D0",
+      "foreground": "#FFFFFF"
+    },
+    "secondary": {
+      "main": "#22C55E",
+      "hover": "#16A34A",
+      "foreground": "#FFFFFF"
+    },
+    "accent": {
+      "main": "#8B5CF6",
+      "cyan": "#06B6D4",
+      "warning": "#F59E0B",
+      "danger": "#EF4444"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#94A3B8",
+      "muted": "#64748B",
+      "accent": "#38BDF8"
+    },
+    "border": {
+      "subtle": "#1E293B",
+      "active": "#334155"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "headings": "Manrope, sans-serif",
+      "body": "Inter, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "scale": {
+      "h1": "text-5xl md:text-6xl font-bold tracking-tight",
+      "h2": "text-3xl md:text-4xl font-bold tracking-tight",
+      "h3": "text-2xl font-semibold tracking-tight",
+      "body_lg": "text-lg leading-relaxed",
+      "body_base": "text-base leading-relaxed",
+      "caption": "text-sm text-muted-foreground",
+      "mono_lg": "font-mono text-lg tracking-wide",
+      "mono_base": "font-mono text-sm tracking-wide"
+    }
+  },
+  "layout_system": {
+    "grid": {
+      "marketing": "grid-cols-1 md:grid-cols-12 gap-8",
+      "dashboard": "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6",
+      "detail": "grid-cols-1 lg:grid-cols-12 gap-8"
+    },
+    "spacing": {
+      "page_padding": "px-4 md:px-8 lg:px-12",
+      "section_gap": "py-16 md:py-24",
+      "card_padding": "p-6"
+    },
+    "container": {
+      "max_width": "max-w-7xl mx-auto"
+    }
+  },
+  "components": {
+    "card": {
+      "style": "bg-card border border-border rounded-xl shadow-sm hover:border-primary/50 transition-colors duration-300",
+      "content_padding": "p-6"
+    },
+    "button": {
+      "primary": "bg-primary text-white hover:bg-primary/90 rounded-lg font-medium px-6 py-2.5 transition-all shadow-[0_0_15px_rgba(0,82,255,0.3)] hover:shadow-[0_0_25px_rgba(0,82,255,0.5)]",
+      "secondary": "bg-secondary/20 text-secondary-foreground hover:bg-secondary/30 border border-secondary/20 rounded-lg font-medium px-6 py-2.5",
+      "outline": "border border-border bg-transparent hover:bg-accent hover:text-white rounded-lg px-6 py-2.5",
+      "ghost": "hover:bg-accent/50 text-foreground px-4 py-2 rounded-lg"
+    },
+    "input": {
+      "base": "bg-background border border-border rounded-lg px-4 py-3 focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder:text-muted-foreground"
+    },
+    "badge": {
+      "base": "inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+      "success": "border-transparent bg-secondary text-secondary-foreground hover:bg-secondary/80",
+      "warning": "border-transparent bg-accent-warning text-white hover:bg-accent-warning/80"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": "backdrop-blur-xl bg-background/70 border-b border-white/5",
+    "gradients": {
+      "hero": "bg-gradient-to-br from-blue-900/20 via-background to-background",
+      "card_hover": "bg-gradient-to-br from-primary/5 to-transparent"
+    },
+    "shadows": {
+      "neon": "shadow-[0_0_10px_rgba(0,82,255,0.15)]",
+      "glow_text": "drop-shadow-[0_0_8px_rgba(255,255,255,0.3)]"
+    }
+  },
+  "assets": {
+    "images": {
+      "hero_bg": "https://images.unsplash.com/photo-1660836814985-8523a0d713b5?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA1OTV8MHwxfHNlYXJjaHwzfHxhYnN0cmFjdCUyMGRhcmslMjBmdXR1cmlzdGljJTIwYmxvY2tjaGFpbiUyMG5ldHdvcmslMjBiYWNrZ3JvdW5kfGVufDB8fHx8MTc3MTk3NTU1OXww&ixlib=rb-4.1.0&q=85",
+      "pattern_overlay": "data:image/svg+xml,%3Csvg width='20' height='20' viewBox='0 0 20 20' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%239C92AC' fill-opacity='0.05' fill-rule='evenodd'%3E%3Ccircle cx='3' cy='3' r='1'/%3E%3Ccircle cx='13' cy='13' r='1'/%3E%3C/g%3E%3C/svg%3E"
+    },
+    "icons": {
+      "library": "lucide-react",
+      "custom": "HeroIcons for UI, CryptoIcons (generic) for tokens if needed"
+    }
+  },
+  "universal_guidelines": [
+    "Do NOT use gradients for main backgrounds; use them for accents or overlays.",
+    "Use 'Manrope' for all headings and 'Inter' for body text.",
+    "Use 'JetBrains Mono' for all numerical data (APY, TVL, Balance) and addresses.",
+    "Ensure all interactive elements have a hover state that brightens or lifts.",
+    "Use 2-3x more padding than standard Tailwind defaults.",
+    "Add 'data-testid' to all interactive elements."
+  ],
+  "instructions_to_main_agent": [
+    "Install 'wagmi', 'viem', '@rainbow-me/rainbowkit', '@tanstack/react-query' immediately.",
+    "Configure Tailwind to use the specified colors in 'design_guidelines.json'.",
+    "Create a 'Layout' component that includes the Navbar (with ConnectButton) and Footer.",
+    "Use 'react-router-dom' (v6/v7) for routing.",
+    "Mock data for Vaults initially, but structure the service layer to fetch from API.",
+    "Implement the 'Network Switch' in the Navbar next to the Connect Button.",
+    "The '/vaults' page should be the main dashboard view.",
+    "The '/vaults/:id' page should use a 'Detail View' layout with charts on the left, interaction on the right."
+  ]
+}
