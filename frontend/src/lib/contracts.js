@@ -14,33 +14,18 @@ export const ERC20_ABI = [
   { type: "function", name: "name", stateMutability: "view", inputs: [], outputs: [{ type: "string" }] },
 ];
 
-// Beefy-style Vault ABI (ERC4626-like)
+// ERC4626-style Vault ABI
 export const VAULT_ABI = [
-  // Read functions
-  { type: "function", name: "balanceOf", stateMutability: "view",
-    inputs: [{ name: "account", type: "address" }],
-    outputs: [{ type: "uint256" }] },
-  { type: "function", name: "totalSupply", stateMutability: "view",
-    inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "balance", stateMutability: "view",
-    inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "getPricePerFullShare", stateMutability: "view",
-    inputs: [], outputs: [{ type: "uint256" }] },
-  { type: "function", name: "decimals", stateMutability: "view",
-    inputs: [], outputs: [{ type: "uint8" }] },
-  { type: "function", name: "want", stateMutability: "view",
-    inputs: [], outputs: [{ type: "address" }] },
-  { type: "function", name: "strategy", stateMutability: "view",
-    inputs: [], outputs: [{ type: "address" }] },
-  // Write functions
   { type: "function", name: "deposit", stateMutability: "nonpayable",
-    inputs: [{ name: "_amount", type: "uint256" }], outputs: [] },
-  { type: "function", name: "depositAll", stateMutability: "nonpayable",
-    inputs: [], outputs: [] },
+    inputs: [{ name: "amount", type: "uint256" }], outputs: [] },
   { type: "function", name: "withdraw", stateMutability: "nonpayable",
-    inputs: [{ name: "_shares", type: "uint256" }], outputs: [] },
-  { type: "function", name: "withdrawAll", stateMutability: "nonpayable",
-    inputs: [], outputs: [] },
+    inputs: [{ name: "shares", type: "uint256" }], outputs: [] },
+  { type: "function", name: "balanceOf", stateMutability: "view",
+    inputs: [{ name: "user", type: "address" }], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "totalAssets", stateMutability: "view",
+    inputs: [], outputs: [{ type: "uint256" }] },
+  { type: "function", name: "pricePerShare", stateMutability: "view",
+    inputs: [], outputs: [{ type: "uint256" }] },
 ];
 
 // Strategy ABI (for harvest info)
