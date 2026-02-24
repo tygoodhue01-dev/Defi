@@ -212,7 +212,7 @@ async def get_vault(vault_id: str):
         raise HTTPException(status_code=404, detail="Vault not found")
     return vault
 
-@api_router.post("/vaults", response_model=Vault)
+@api_router.post("/vaults", response_model=Vault, status_code=201)
 async def create_vault(data: VaultCreate, session: str = Depends(get_admin_session)):
     vault = Vault(**data.model_dump())
     doc = vault.model_dump()
