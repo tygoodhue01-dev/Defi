@@ -203,6 +203,11 @@ export default function VaultDetailPage() {
                     Paused
                   </Badge>
                 )}
+                {vault.experimental && (
+                  <Badge variant="outline" className="border-yellow-500/50 text-yellow-400 bg-yellow-500/10">
+                    Beta
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
