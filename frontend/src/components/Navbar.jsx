@@ -3,7 +3,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
-import { Vault, Settings, ExternalLink, Menu, X } from 'lucide-react';
+import { Settings, Menu, X, ChevronDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -11,6 +11,14 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+
+// SVG Logo Component
+const VaultLogo = ({ className }) => (
+  <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+  </svg>
+);
 
 export function Navbar() {
   const location = useLocation();
@@ -22,7 +30,7 @@ export function Navbar() {
   const isActive = (path) => location.pathname === path || location.pathname.startsWith(path + '/');
 
   const navLinks = [
-    { path: '/vaults', label: 'Vaults', icon: Vault },
+    { path: '/vaults', label: 'Vaults' },
   ];
 
   return (
@@ -32,9 +40,9 @@ export function Navbar() {
           {/* Logo */}
           <Link to="/" className="flex items-center gap-3 group" data-testid="navbar-logo">
             <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center glow-primary group-hover:glow-primary-hover transition-all">
-              <Vault className="w-5 h-5 text-primary" />
+              <VaultLogo className="w-5 h-5 text-primary" />
             </div>
-            <span className="text-xl font-bold font-heading hidden sm:block">
+            <span className="text-xl font-bold hidden sm:block">
               <span className="text-primary">Base</span>
               <span className="text-foreground">Vault</span>
             </span>
@@ -42,14 +50,14 @@ export function Navbar() {
 
           {/* Desktop Navigation */}
           <nav className="hidden md:flex items-center gap-2">
-            {navLinks.map(({ path, label, icon: Icon }) => (
+            {navLinks.map(({ path, label }) => (
               <Link key={path} to={path}>
                 <Button
                   variant={isActive(path) ? 'secondary' : 'ghost'}
                   className={`gap-2 ${isActive(path) ? 'bg-primary/20 text-primary' : ''}`}
                   data-testid={`nav-${label.toLowerCase()}`}
                 >
-                  <Icon className="w-4 h-4" />
+                  <VaultLogo className="w-4 h-4" />
                   {label}
                 </Button>
               </Link>
@@ -71,6 +79,7 @@ export function Navbar() {
                   >
                     <div className={`w-2 h-2 rounded-full ${chainId === base.id ? 'bg-green-500' : 'bg-yellow-500'}`} />
                     {chainId === base.id ? 'Base' : 'Sepolia'}
+                    <ChevronDown className="w-3 h-3" />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="bg-card border-border">
@@ -130,13 +139,13 @@ export function Navbar() {
         {mobileMenuOpen && (
           <div className="md:hidden py-4 border-t border-border/50">
             <nav className="flex flex-col gap-2">
-              {navLinks.map(({ path, label, icon: Icon }) => (
+              {navLinks.map(({ path, label }) => (
                 <Link key={path} to={path} onClick={() => setMobileMenuOpen(false)}>
                   <Button
                     variant={isActive(path) ? 'secondary' : 'ghost'}
                     className={`w-full justify-start gap-2 ${isActive(path) ? 'bg-primary/20 text-primary' : ''}`}
                   >
-                    <Icon className="w-4 h-4" />
+                    <VaultLogo className="w-4 h-4" />
                     {label}
                   </Button>
                 </Link>
