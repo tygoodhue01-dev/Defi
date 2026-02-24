@@ -61,6 +61,7 @@ class Vault(BaseModel):
     routerAddress: str
     feeRecipients: List[str] = []
     paused: bool = False
+    experimental: bool = False  # New: experimental vault flag
     createdAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updatedAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -77,6 +78,7 @@ class VaultCreate(BaseModel):
     routerAddress: str
     feeRecipients: List[str] = []
     paused: bool = False
+    experimental: bool = False
 
 class VaultUpdate(BaseModel):
     name: Optional[str] = None
@@ -91,6 +93,7 @@ class VaultUpdate(BaseModel):
     routerAddress: Optional[str] = None
     feeRecipients: Optional[List[str]] = None
     paused: Optional[bool] = None
+    experimental: Optional[bool] = None
 
 class VaultMetrics(BaseModel):
     model_config = ConfigDict(extra="ignore")
