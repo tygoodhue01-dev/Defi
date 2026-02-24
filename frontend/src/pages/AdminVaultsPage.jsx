@@ -466,6 +466,21 @@ export default function AdminVaultsPage() {
                 data-testid="paused-switch"
               />
             </div>
+
+            <div className="flex items-center justify-between p-4 rounded-lg bg-yellow-500/5 border border-yellow-500/20">
+              <div>
+                <Label htmlFor="experimental" className="text-base">Experimental (Beta)</Label>
+                <p className="text-sm text-muted-foreground">
+                  Mark as experimental/beta vault
+                </p>
+              </div>
+              <Switch
+                id="experimental"
+                checked={formData.experimental}
+                onCheckedChange={(checked) => handleInputChange('experimental', checked)}
+                data-testid="experimental-switch"
+              />
+            </div>
           </div>
 
           <DialogFooter>
