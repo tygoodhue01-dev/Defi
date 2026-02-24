@@ -12,6 +12,9 @@ import uuid
 from datetime import datetime, timezone
 import secrets
 import hashlib
+from web3 import Web3
+from web3.exceptions import ContractLogicError
+import httpx
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -24,6 +27,10 @@ db = client[os.environ['DB_NAME']]
 # Admin password from env
 ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'admin123')
 SESSION_SECRET = os.environ.get('SESSION_SECRET', secrets.token_hex(32))
+
+# RPC URLs
+BASE_RPC_URL = os.environ.get('BASE_RPC_URL', 'https://mainnet.base.org')
+BASE_SEPOLIA_RPC_URL = os.environ.get('BASE_SEPOLIA_RPC_URL', 'https://sepolia.base.org')
 
 # Create the main app
 app = FastAPI()
@@ -40,6 +47,183 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ====================
+# Web3 Helpers
+# ====================
+
+def get_web3(chain_id: int) -> Web3:
+    """Get Web3 instance for the given chain."""
+    if chain_id == 8453:  # Base Mainnet
+        return Web3(Web3.HTTPProvider(BASE_RPC_URL))
+    elif chain_id == 84532:  # Base Sepolia
+        return Web3(Web3.HTTPProvider(BASE_SEPOLIA_RPC_URL))
+    else:
+        raise ValueError(f"Unsupported chain ID: {chain_id}")
+
+# Minimal ABIs for reading
+VAULT_ABI = [
+    {"type": "function", "name": "totalAssets", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "pricePerShare", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "totalSupply", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+]
+
+STRATEGY_ABI = [
+    {"type": "function", "name": "balanceOf", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "lastHarvest", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+]
+
+ERC20_ABI = [
+    {"type": "function", "name": "decimals", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint8"}]},
+    {"type": "function", "name": "totalSupply", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+]
+
+# Simple LP price cache (in production, use Redis or proper cache)
+lp_price_cache = {}
+
+async def get_lp_price_usd(lp_address: str, chain_id: int) -> float:
+    """
+    Get LP token price in USD.
+    For MVP: returns a reasonable estimate.
+    For production: integrate with DEX pricing or oracle.
+    """
+    cache_key = f"{chain_id}:{lp_address.lower()}"
+    
+    # Check cache (5 min TTL)
+    if cache_key in lp_price_cache:
+        cached_price, cached_time = lp_price_cache[cache_key]
+        if (datetime.now(timezone.utc) - cached_time).total_seconds() < 300:
+            return cached_price
+    
+    # For testnet, return mock price
+    if chain_id == 84532:
+        price = 100.0  # Mock $100 per LP on testnet
+        lp_price_cache[cache_key] = (price, datetime.now(timezone.utc))
+        return price
+    
+    # For mainnet, try to fetch from a pricing API
+    # This is a simplified approach - production would use DEX pool math
+    try:
+        # Try CoinGecko or similar API for known tokens
+        # For unknown LPs, estimate based on underlying tokens
+        async with httpx.AsyncClient() as client:
+            # This is a placeholder - in production, implement proper LP pricing
+            # Options: 1) Query DEX pools, 2) Use LP token oracle, 3) Calculate from reserves
+            pass
+    except Exception as e:
+        logger.warning(f"Failed to fetch LP price: {e}")
+    
+    # Default fallback price for unknown LPs
+    price = 50.0
+    lp_price_cache[cache_key] = (price, datetime.now(timezone.utc))
+    return price
+
+async def calculate_apy(
+    tvl_usd: float,
+    reward_token_price: float,
+    daily_rewards: float,
+    performance_fee: float = 0.045  # 4.5% default fee
+) -> float:
+    """
+    Calculate APY from emission rate.
+    APY = ((1 + daily_rate) ^ 365 - 1) * 100
+    
+    daily_rate = (daily_rewards * reward_price) / TVL
+    """
+    if tvl_usd <= 0:
+        return 0.0
+    
+    daily_reward_usd = daily_rewards * reward_token_price
+    daily_rate = daily_reward_usd / tvl_usd
+    
+    # Apply performance fee
+    daily_rate_after_fee = daily_rate * (1 - performance_fee)
+    
+    # Compound daily for APY
+    apy = ((1 + daily_rate_after_fee) ** 365 - 1) * 100
+    
+    # Cap at reasonable max
+    return min(apy, 10000.0)
+
+async def read_vault_on_chain(vault: dict) -> dict:
+    """
+    Read on-chain data from vault and strategy contracts.
+    Returns dict with totalAssets, pricePerShare, lastHarvest, etc.
+    """
+    chain_id = vault.get('chainId', 84532)
+    vault_address = vault.get('vaultAddress', '')
+    strategy_address = vault.get('strategyAddress', '')
+    
+    result = {
+        'totalAssets': 0,
+        'pricePerShare': 1e18,  # Default 1.0 in 18 decimals
+        'totalSupply': 0,
+        'lastHarvest': None,
+        'strategyBalance': 0,
+    }
+    
+    if not vault_address:
+        return result
+    
+    try:
+        w3 = get_web3(chain_id)
+        
+        # Validate addresses
+        if not w3.is_address(vault_address):
+            logger.warning(f"Invalid vault address: {vault_address}")
+            return result
+        
+        vault_contract = w3.eth.contract(
+            address=w3.to_checksum_address(vault_address),
+            abi=VAULT_ABI
+        )
+        
+        # Read vault data
+        try:
+            result['totalAssets'] = vault_contract.functions.totalAssets().call()
+        except ContractLogicError:
+            logger.debug(f"totalAssets not available on vault {vault_address}")
+        
+        try:
+            result['pricePerShare'] = vault_contract.functions.pricePerShare().call()
+        except ContractLogicError:
+            logger.debug(f"pricePerShare not available on vault {vault_address}")
+        
+        try:
+            result['totalSupply'] = vault_contract.functions.totalSupply().call()
+        except ContractLogicError:
+            logger.debug(f"totalSupply not available on vault {vault_address}")
+        
+        # Read strategy data if address provided
+        if strategy_address and w3.is_address(strategy_address):
+            strategy_contract = w3.eth.contract(
+                address=w3.to_checksum_address(strategy_address),
+                abi=STRATEGY_ABI
+            )
+            
+            try:
+                result['strategyBalance'] = strategy_contract.functions.balanceOf().call()
+            except ContractLogicError:
+                pass
+            
+            try:
+                last_harvest_ts = strategy_contract.functions.lastHarvest().call()
+                if last_harvest_ts > 0:
+                    result['lastHarvest'] = datetime.fromtimestamp(last_harvest_ts, tz=timezone.utc).isoformat()
+            except ContractLogicError:
+                pass
+        
+    except Exception as e:
+        logger.error(f"Error reading vault on-chain data: {e}")
+    
+    return result
 
 # ====================
 # Models
