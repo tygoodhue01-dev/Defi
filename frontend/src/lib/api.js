@@ -106,6 +106,42 @@ export const userActionApi = {
 };
 
 // ====================
+// Beefy-style APIs
+// ====================
+
+export const beefyApi = {
+  // Get all token prices
+  getPrices: async (chainId = 8453) => {
+    const response = await api.get('/prices', { params: { chain_id: chainId } });
+    return response.data;
+  },
+
+  // Get all LP prices
+  getLps: async (chainId = 8453) => {
+    const response = await api.get('/lps', { params: { chain_id: chainId } });
+    return response.data;
+  },
+
+  // Get TVL for all vaults
+  getTvl: async () => {
+    const response = await api.get('/tvl');
+    return response.data;
+  },
+
+  // Get APY for all vaults
+  getApy: async () => {
+    const response = await api.get('/apy');
+    return response.data;
+  },
+
+  // Get APY breakdown for a specific vault
+  getVaultApy: async (vaultId) => {
+    const response = await api.get(`/apy/${vaultId}`);
+    return response.data;
+  },
+};
+
+// ====================
 // Auth APIs
 // ====================
 

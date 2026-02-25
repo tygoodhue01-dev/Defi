@@ -12,13 +12,14 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { VaultCard } from '@/components/VaultCard';
-import { vaultApi, metricsApi } from '@/lib/api';
+import { vaultApi, beefyApi } from '@/lib/api';
 import { chainNames } from '@/lib/wagmi';
 
 export default function VaultsPage() {
   const chainId = useChainId();
   const [vaults, setVaults] = useState([]);
-  const [metrics, setMetrics] = useState({});
+  const [tvlData, setTvlData] = useState({});
+  const [apyData, setApyData] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,22 +30,14 @@ export default function VaultsPage() {
     try {
       setLoading(true);
       setError(null);
-      const data = await vaultApi.getVaults();
+      const [data, tvl, apy] = await Promise.all([
+        vaultApi.getVaults(),
+        beefyApi.getTvl(),
+        beefyApi.getApy(),
+      ]);
       setVaults(data);
-      
-      // Fetch metrics for each vault
-      const metricsMap = {};
-      await Promise.all(
-        data.map(async (vault) => {
-          try {
-            const vaultMetrics = await metricsApi.getMetrics(vault.id);
-            metricsMap[vault.id] = vaultMetrics;
-          } catch (e) {
-            console.error(`Failed to fetch metrics for vault ${vault.id}`, e);
-          }
-        })
-      );
-      setMetrics(metricsMap);
+      setTvlData(tvl);
+      setApyData(apy);
     } catch (e) {
       console.error('Failed to fetch vaults:', e);
       setError('Failed to load vaults. Please try again.');
@@ -73,8 +66,10 @@ export default function VaultsPage() {
     return matchesSearch && matchesChain && matchesStatus;
   });
 
-  // Calculate totals
-  const totalTvl = Object.values(metrics).reduce((sum, m) => sum + parseFloat(m?.tvl || 0), 0);
+  // Calculate totals from Beefy-style TVL data
+  const totalTvl = Object.entries(tvlData)
+    .filter(([k]) => k !== '_meta')
+    .reduce((sum, [, v]) => sum + (v?.tvl || 0), 0);
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 md:py-12">
@@ -187,7 +182,8 @@ export default function VaultsPage() {
             <VaultCard 
               key={vault.id} 
               vault={vault} 
-              metrics={metrics[vault.id]} 
+              tvl={tvlData[vault.id]}
+              apy={apyData[vault.id]}
             />
           ))}
         </div>
