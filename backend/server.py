@@ -232,6 +232,7 @@ async def read_vault_on_chain(vault: dict) -> dict:
     Read on-chain data from vault and strategy contracts.
     Returns dict with totalAssets, pricePerShare, lastHarvest, decimals, etc.
     """
+    price_service = get_price_service()
     chain_id = vault.get('chainId', 84532)
     vault_address = vault.get('vaultAddress', '')
     strategy_address = vault.get('strategyAddress', '')
@@ -252,8 +253,8 @@ async def read_vault_on_chain(vault: dict) -> dict:
     try:
         w3 = get_web3(chain_id)
         
-        # Get want token decimals
-        result['decimals'] = get_token_decimals(w3, want_address)
+        # Get want token decimals using price service
+        result['decimals'] = price_service.get_token_decimals(w3, want_address)
         
         if not w3.is_address(vault_address):
             logger.warning(f"Invalid vault address: {vault_address}")
