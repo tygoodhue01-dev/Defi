@@ -21,7 +21,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { VaultActions } from '@/components/VaultActions';
 import { HarvestHistory } from '@/components/HarvestHistory';
-import { vaultApi, metricsApi, harvestApi } from '@/lib/api';
+import { vaultApi, metricsApi, harvestApi, beefyApi } from '@/lib/api';
 import { VAULT_ABI, ERC20_ABI } from '@/lib/contracts';
 import {
   formatUSD,
@@ -39,6 +39,7 @@ export default function VaultDetailPage() {
   const chainId = useChainId();
   const [vault, setVault] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [apyBreakdown, setApyBreakdown] = useState(null);
   const [harvests, setHarvests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -78,14 +79,16 @@ export default function VaultDetailPage() {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [vaultData, metricsData, harvestsData] = await Promise.all([
+      const [vaultData, metricsData, harvestsData, apyData] = await Promise.all([
         vaultApi.getVault(id),
         metricsApi.getMetrics(id),
         harvestApi.getHarvests(id),
+        beefyApi.getVaultApy(id),
       ]);
       setVault(vaultData);
       setMetrics(metricsData);
       setHarvests(harvestsData);
+      setApyBreakdown(apyData);
     } catch (e) {
       console.error('Failed to fetch vault:', e);
       toast.error('Failed to load vault details');
@@ -97,8 +100,12 @@ export default function VaultDetailPage() {
   const refreshMetrics = async () => {
     try {
       setRefreshing(true);
-      const newMetrics = await metricsApi.refreshMetrics(id);
+      const [newMetrics, newApy] = await Promise.all([
+        metricsApi.refreshMetrics(id),
+        beefyApi.getVaultApy(id),
+      ]);
       setMetrics(newMetrics);
+      setApyBreakdown(newApy);
       refetchPrice();
       refetchAssets();
       toast.success('Metrics refreshed');
