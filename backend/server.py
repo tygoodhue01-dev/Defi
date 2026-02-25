@@ -11,10 +11,11 @@ from typing import List, Optional
 import uuid
 from datetime import datetime, timezone
 import secrets
-import hashlib
 from web3 import Web3
 from web3.exceptions import ContractLogicError
 import httpx
+
+from price_service import get_price_service, DataQuality
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
