@@ -215,6 +215,18 @@ export default function VaultDetailPage() {
                     Beta
                   </Badge>
                 )}
+                {apyBreakdown?.dataQuality && apyBreakdown.dataQuality !== 'ok' && (
+                  <Badge 
+                    variant="outline" 
+                    className={apyBreakdown.dataQuality === 'stale' 
+                      ? 'border-yellow-500/50 text-yellow-400 bg-yellow-500/10 gap-1' 
+                      : 'border-red-500/50 text-red-400 bg-red-500/10 gap-1'}
+                    data-testid="data-quality-badge"
+                  >
+                    <AlertCircle className="w-3 h-3" />
+                    {apyBreakdown.dataQuality === 'stale' ? 'Stale Data' : 'Data Error'}
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
