@@ -100,7 +100,7 @@ export default function VaultDetailPage() {
       const newMetrics = await metricsApi.refreshMetrics(id);
       setMetrics(newMetrics);
       refetchPrice();
-      refetchSupply();
+      refetchAssets();
       toast.success('Metrics refreshed');
     } catch (e) {
       console.error('Failed to refresh metrics:', e);
