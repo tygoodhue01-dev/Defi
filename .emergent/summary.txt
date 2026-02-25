@@ -1,0 +1,149 @@
+<analysis>**original_problem_statement:**
+Build a production-ready, Beefy-style DeFi vault dashboard.
+
+**PRODUCT REQUIREMENTS:**
+- **Tech Stack:** Next.js, TypeScript, Tailwind CSS, wagmi, viem, RainbowKit for the frontend. FastAPI for the backend.
+- **Networks:** Supports Base mainnet (chainId 8453) and Base Sepolia (84532) with a UI network switch.
+- **Pages:**
+    - : A list of all available vaults with key metrics (TVL, APY, etc.).
+    - : A detailed page for a specific vault, showing in-depth stats and allowing user actions like deposit and withdraw.
+    - : A password-protected page for creating and editing vault configurations in the database.
+- **Backend APIs & Data:**
+    - APIs to list vaults, get vault details, and refresh on-chain metrics.
+    - A database to store vault configurations ( table) and cached metrics ( table).
+    - Production-grade, on-chain calculations for TVL and APY, including Uniswap V2 LP pricing and MasterChef-style farm emissions.
+    - A reusable pricing service with caching and rate-limiting for token prices.
+- **User-Requested Features:**
+    - Simple password-based admin authentication using an  cookie.
+    - A dark, DeFi-themed design similar to Beefy Finance.
+    - Tracking for harvest history and user deposit/withdrawal actions.
+    - A Beefy-style API structure with dedicated endpoints for , , , and .
+    - A vault adapter pattern to support various DeFi primitives.
+
+**User's preferred language**: English
+
+**what currently exists?**
+A full-stack application with a Next.js frontend and a FastAPI backend. The frontend features pages for listing vaults, viewing vault details, and a functional admin panel. The backend includes database models and APIs for vault management and metrics calculation. A sophisticated, reusable pricing service () has been built, featuring caching, rate-limiting, and CoinGecko integration for token pricing. The system performs production-grade, on-chain calculations for TVL and APY, dynamically handling token decimals and different contract types.
+
+**Last working item**:
+- **Last item agent was working:** The agent began a major refactoring of the backend to implement a Beefy-style API. This involves creating new, dedicated endpoints: , , , and  to serve data in a more modular and scalable way, similar to production DeFi protocols. A new file, , was created to house this logic.
+- **Status:** IN PROGRESS
+- **Agent Testing Done:** N
+- **Which testing method agent to use?** backend testing agent
+- **User Testing Done:** N
+
+**All Pending/In progress Issue list**:
+There are no pending bugs. All work is focused on new feature implementation and refactoring.
+
+**In progress Task List**:
+- **Task 1: Complete Beefy-style API Refactor** (P0)
+    - **Where to resume:** The agent has created  and made initial changes to . The next steps are to fully implement the logic for the , , , and  endpoints within  and integrate this new router into the main  application.
+    - **What will be achieved with this?** The backend API will be more modular, scalable, and aligned with industry standards for DeFi dashboards, separating concerns for prices, TVL, and APY.
+    - **Status:** IN PROGRESS
+    - **Should Test frontend/backend/both after fix?** Both. First, test the new backend endpoints with . Then, update the frontend to consume them and conduct a full UI test.
+    - **Blocked on something:** No.
+
+**Upcoming and Future Tasks**
+**Upcoming Tasks:**
+- **P0: Implement Vault Adapter Pattern:** After the API refactor, implement a proper adapter pattern in the backend. This will allow the metrics calculation system to flexibly support different types of vaults (e.g., Uniswap V2, Balancer) and farms (e.g., MasterChef) by selecting the correct logic based on the vault's configuration.
+- **P1: Update Frontend to Consume New APIs:** Modify the vault list () and vault detail () pages to fetch data from the new  and  endpoints instead of the legacy metrics endpoint.
+- **P1: Display Data Quality in UI:** Add a visual indicator to the frontend that reflects the  flag (, , ) returned from the backend, informing the user about the freshness of the displayed data.
+
+**Future Tasks:**
+- **P2: Implement  Calculation:** The  field in the APY breakdown is currently a placeholder returning . This needs to be implemented by fetching and calculating trading fees from the underlying liquidity pool, possibly via a DEX analytics API.
+- **P2: Add Cron Job for Metrics Refresh:** Create a scheduled background task (cron job) to automatically and periodically call the metrics refresh endpoint for all vaults. This will ensure data remains up-to-date without manual intervention.
+
+**Completed work in this session**
+- **Full-Stack Scaffolding:** Initialized the Next.js frontend and FastAPI backend.
+- **Core UI/UX:** Built the main pages:  (list),  (detail), and a password-protected  area with full CRUD functionality.
+- **Web3 Frontend Integration:** Integrated , , and  to handle wallet connections, network switching, and on-chain contract interactions for deposits and withdrawals.
+- **Production-Grade Metrics Engine:** Replaced all mock data with a robust backend system that performs real-time, on-chain calculations for TVL and APY, dynamically handling token  and reading from Uniswap V2 and MasterChef-style contracts.
+- **Advanced Pricing Service:** Architected and implemented a reusable  module with caching, rate-limiting, and CoinGecko integration to provide reliable token and LP pricing.
+- **Admin Cache Management:** Added administrative API endpoints (, ) to monitor and manage the pricing service cache.
+
+**Earlier issues found/mentioned but not fixed**
+None.
+
+**Known issue recurrence from previous fork**
+N/A
+
+**Code Architecture**
+
+
+**Key Technical Concepts**
+- **Frontend:** Next.js (App Router), React, TypeScript, Tailwind CSS, shadcn/ui
+- **Web3 Frontend:** , , 
+- **Backend:** FastAPI, Pydantic
+- **Web3 Backend:** 
+- **Database:** MongoDB
+- **Architecture:** Full-stack, server-side metric caching, modular pricing service, REST API.
+
+**key DB schema**
+- ****: Stores static vault configuration (, , , , , , , etc.).
+- ****: Caches time-sensitive, computed data (, , , , , , , etc.).
+- ****: Logs historical harvest transactions (, , ).
+- ****: Tracks user deposits and withdrawals (, , , , ).
+
+**changes in tech stack**
+None.
+
+**All files of reference**
+- ****: The main FastAPI application file, containing models, legacy API routes, and metric calculation logic. It's being refactored.
+- ****: A critical new module that abstracts all token and LP pricing logic, including caching and external API calls.
+- ****: A new file created to house the Beefy-style API endpoints (, , etc.). Currently in development.
+- ****: The vault detail page, which handles all user interactions and displays detailed on-chain data.
+- ****: The admin panel for creating and editing vault configurations.
+
+**Areas that need refactoring**:
+The primary refactoring is already in progress: moving logic from the monolithic  into the new  and a future vault adapter module. This will greatly improve modularity and maintainability.
+
+**key api endpoints**
+- **Admin:**
+  - : Authenticates the admin user.
+  - : Manages vault configurations.
+- **New Beefy-style APIs (In Progress):**
+  - : Returns a map of all token prices.
+  - : Returns a map of all LP token prices.
+  - : Returns TVL for each vault.
+  - : Returns a detailed APY breakdown for each vault.
+- **Legacy APIs (to be deprecated):**
+  - , 
+
+**Critical Info for New Agent**
+- You are in the middle of a significant backend refactor to create a Beefy-style API. The main goal is to replace the old metrics system with dedicated endpoints: , , , and . Your immediate task is to complete the implementation in .
+- The  module is the single source of truth for all pricing data. It is feature-complete with caching and rate-limiting. Use it for all price and decimal lookups.
+- After finishing the backend API, the next critical step is to update the frontend pages ( and ) to consume these new, granular endpoints.
+- Adhere strictly to the user's detailed technical instructions. When data cannot be fetched, ensure  is set to  and numeric fields are , avoiding any placeholder values.
+
+**documents and test reports created in this job**
+- 
+- 
+
+**Last 10 User Messages and any pending HUMAN messages**
+1. **(Msg 214)** **Request:** Rework the backend to match Beefy’s API structure, creating dedicated endpoints (, , , ), a detailed APY breakdown, and a vault adapter pattern. **Status: IN PROGRESS**.
+2. **(Msg 164)** **Request:** Refactor all pricing logic into a reusable price service with caching and rate limiting. **Status: COMPLETED**.
+3. **(Msg 134)** **Request:** Upgrade the backend metrics to be production-grade, using real on-chain data for LP pricing and APY math, and add a  flag. **Status: COMPLETED**.
+4. **(Msg 126)** **Feedback:** Pointed out that hardcoding  for token normalization is incorrect and to use the token's actual . **Status: COMPLETED**.
+5. **(Msg 122)** **Request:** Simplify the withdrawal UI to be LP-only, removing the option to withdraw by shares. **Status: COMPLETED**.
+6. **(Msg 118)** **Request:** Add an option in the UI to withdraw a specific LP amount, converting it from shares using . **Status: COMPLETED**.
+7. **(Msg 114)** **Feedback:** Recommended fetching the  token's  once and reusing it, rather than hardcoding 18. **Status: COMPLETED**.
+8. **(Msg 110)** **Bug Report:** Identified a bug in  where  was called but not defined. **Status: COMPLETED**.
+9. **(Msg 88)** **Clarification:** Provided detailed instructions on how the  endpoint should calculate TVL and APY from on-chain data. **Status: COMPLETED**.
+10. **(Msg 76)** **Clarification:** Provided a comprehensive to-do list for implementing the Vault Stats panel, including the data sources for each metric and the required backend caching system. **Status: COMPLETED**.
+
+**Project Health Check:**
+- **Broken:** The application is in a transitional state. The frontend is functional but still connected to legacy backend endpoints that are being refactored.
+- **Mocked:**  is a placeholder (hardcoded to 0). On-chain calls for test vaults return 0 as the underlying contracts are not deployed.
+
+**3rd Party Integrations**
+- **CoinGecko:** Used for fetching token prices via a REST API in the backend .
+- **RainbowKit / wagmi / viem:** A suite of frontend libraries for wallet connectivity and Ethereum contract interaction.
+
+**Testing status**
+- **Testing agent used after significant changes:** YES
+- **Troubleshoot agent used after agent stuck in loop:** NO
+- **Test files created:** None
+- **Known regressions:** None
+
+**Credentials to test flow:**
+- **Admin Panel:** The password is set via the  environment variable in .</analysis>

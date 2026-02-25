@@ -11,7 +11,7 @@ from datetime import datetime
 from urllib.parse import urljoin
 
 class BaseVaultAPITester:
-    def __init__(self, base_url="https://vault-dashboard-2.preview.emergentagent.com"):
+    def __init__(self, base_url="https://defi-metrics-hub.preview.emergentagent.com"):
         self.base_url = base_url
         self.session = requests.Session()
         self.tests_run = 0
