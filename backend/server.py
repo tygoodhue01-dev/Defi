@@ -523,31 +523,6 @@ async def read_vault_on_chain(vault: dict) -> dict:
         logger.error(f"Error reading vault on-chain data: {e}")
     
     return result
-            logger.debug(f"totalSupply not available on vault {vault_address}")
-        
-        # Read strategy data if address provided
-        if strategy_address and w3.is_address(strategy_address):
-            strategy_contract = w3.eth.contract(
-                address=w3.to_checksum_address(strategy_address),
-                abi=STRATEGY_ABI
-            )
-            
-            try:
-                result['strategyBalance'] = strategy_contract.functions.balanceOf().call()
-            except ContractLogicError:
-                pass
-            
-            try:
-                last_harvest_ts = strategy_contract.functions.lastHarvest().call()
-                if last_harvest_ts > 0:
-                    result['lastHarvest'] = datetime.fromtimestamp(last_harvest_ts, tz=timezone.utc).isoformat()
-            except ContractLogicError:
-                pass
-        
-    except Exception as e:
-        logger.error(f"Error reading vault on-chain data: {e}")
-    
-    return result
 
 # ====================
 # Models
