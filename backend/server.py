@@ -736,8 +736,12 @@ async def clear_price_cache(session: str = Depends(get_admin_session)):
     price_service.clear_cache()
     return {"success": True, "message": "Price cache cleared"}
 
-# Include the router
+# Include the routers
 app.include_router(api_router)
+app.include_router(beefy_router)
+
+# Inject DB into beefy_api module
+beefy_set_db(db)
 
 app.add_middleware(
     CORSMiddleware,
