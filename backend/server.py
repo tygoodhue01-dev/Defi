@@ -643,15 +643,6 @@ async def refresh_vault_metrics(vault_id: str):
     
     metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
     return metrics
-        {"$set": update_data},
-        upsert=True
-    )
-    
-    metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
-    return metrics
-    
-    metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
-    return metrics
 
 # ====================
 # Harvest Events Routes
