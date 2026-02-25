@@ -459,23 +459,56 @@ async def get_vault_metrics(vault_id: str):
 async def refresh_vault_metrics(vault_id: str):
     """
     Refresh metrics from on-chain data.
-    In production, this would call the blockchain RPC.
-    For now, we return cached metrics with mock data.
+    Reads vault contract, calculates TVL in USD, estimates APY.
     """
     vault = await db.vaults.find_one({"id": vault_id}, {"_id": 0})
     if not vault:
         raise HTTPException(status_code=404, detail="Vault not found")
     
-    # Mock metrics update (in production, fetch from blockchain)
-    import random
+    # Read on-chain data
+    on_chain = await read_vault_on_chain(vault)
+    
+    # Get LP price for TVL calculation
+    lp_price = await get_lp_price_usd(
+        vault.get('wantAddress', ''),
+        vault.get('chainId', 84532)
+    )
+    
+    # Calculate TVL: totalAssets (in wei) / 1e18 * LP price
+    total_assets_normalized = on_chain['totalAssets'] / 1e18 if on_chain['totalAssets'] > 0 else 0
+    tvl_usd = total_assets_normalized * lp_price
+    
+    # Calculate price per share normalized
+    price_per_share_normalized = on_chain['pricePerShare'] / 1e18 if on_chain['pricePerShare'] > 0 else 1.0
+    
+    # Estimate APY (simplified for MVP)
+    # In production: fetch reward rate from farm contract, get reward token price
+    # For now: estimate based on typical DeFi yields
+    estimated_daily_rewards = total_assets_normalized * 0.0001  # ~3.65% base APR assumption
+    reward_token_price = 1.0  # Placeholder - would fetch from pricing API
+    
+    apy = await calculate_apy(
+        tvl_usd=tvl_usd,
+        reward_token_price=reward_token_price,
+        daily_rewards=estimated_daily_rewards,
+        performance_fee=0.045
+    )
+    
+    # Use on-chain lastHarvest if available, otherwise keep existing
+    last_harvest_at = on_chain.get('lastHarvest')
+    existing_metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
     
     update_data = {
-        "tvl": str(random.randint(100000, 10000000)),
-        "apy": str(round(random.uniform(5, 50), 2)),
-        "pricePerShare": str(round(1 + random.uniform(0, 0.5), 6)),
-        "totalSupply": str(random.randint(1000, 100000)),
+        "tvl": str(round(tvl_usd, 2)),
+        "apy": str(round(apy, 2)),
+        "pricePerShare": str(round(price_per_share_normalized, 6)),
+        "totalSupply": str(on_chain.get('totalSupply', 0)),
         "updatedAt": datetime.now(timezone.utc).isoformat()
     }
+    
+    # Only update lastHarvest if we got it from chain or it's new
+    if last_harvest_at:
+        update_data["lastHarvestAt"] = last_harvest_at
     
     await db.vault_metrics.update_one(
         {"vaultId": vault_id},
