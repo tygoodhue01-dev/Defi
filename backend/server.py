@@ -484,8 +484,10 @@ async def refresh_vault_metrics(vault_id: str):
     if not vault:
         raise HTTPException(status_code=404, detail="Vault not found")
     
-    # Read on-chain data
+    # Read on-chain data (includes decimals from want token)
     on_chain = await read_vault_on_chain(vault)
+    decimals = on_chain['decimals']
+    divisor = 10 ** decimals
     
     # Get LP price for TVL calculation
     lp_price = await get_lp_price_usd(
@@ -493,18 +495,16 @@ async def refresh_vault_metrics(vault_id: str):
         vault.get('chainId', 84532)
     )
     
-    # Calculate TVL: totalAssets (in wei) / 1e18 * LP price
-    total_assets_normalized = on_chain['totalAssets'] / 1e18 if on_chain['totalAssets'] > 0 else 0
+    # Normalize using want token decimals
+    total_assets_normalized = on_chain['totalAssets'] / divisor if on_chain['totalAssets'] > 0 else 0
     tvl_usd = total_assets_normalized * lp_price
     
-    # Calculate price per share normalized
-    price_per_share_normalized = on_chain['pricePerShare'] / 1e18 if on_chain['pricePerShare'] > 0 else 1.0
+    # Normalize price per share using want token decimals
+    price_per_share_normalized = on_chain['pricePerShare'] / divisor if on_chain['pricePerShare'] > 0 else 1.0
     
     # Estimate APY (simplified for MVP)
-    # In production: fetch reward rate from farm contract, get reward token price
-    # For now: estimate based on typical DeFi yields
     estimated_daily_rewards = total_assets_normalized * 0.0001  # ~3.65% base APR assumption
-    reward_token_price = 1.0  # Placeholder - would fetch from pricing API
+    reward_token_price = 1.0  # Placeholder
     
     apy = await calculate_apy(
         tvl_usd=tvl_usd,
@@ -513,19 +513,18 @@ async def refresh_vault_metrics(vault_id: str):
         performance_fee=0.045
     )
     
-    # Use on-chain lastHarvest if available, otherwise keep existing
+    # Use on-chain lastHarvest if available
     last_harvest_at = on_chain.get('lastHarvest')
-    existing_metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
     
     update_data = {
         "tvl": str(round(tvl_usd, 2)),
         "apy": str(round(apy, 2)),
         "pricePerShare": str(round(price_per_share_normalized, 6)),
         "totalSupply": str(on_chain.get('totalSupply', 0)),
+        "decimals": decimals,
         "updatedAt": datetime.now(timezone.utc).isoformat()
     }
     
-    # Only update lastHarvest if we got it from chain or it's new
     if last_harvest_at:
         update_data["lastHarvestAt"] = last_harvest_at
     
