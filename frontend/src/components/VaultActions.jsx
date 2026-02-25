@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Loader2, ArrowDown, ArrowUp, Check, AlertCircle } from 'lucide-react';
+import { Loader2, ArrowDown, ArrowUp, AlertCircle, RotateCcw } from 'lucide-react';
 import { ERC20_ABI, VAULT_ABI } from '@/lib/contracts';
 import { userActionApi } from '@/lib/api';
 
@@ -15,7 +15,8 @@ export function VaultActions({ vault, onActionComplete }) {
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [activeTab, setActiveTab] = useState('deposit');
-  const [decimals, setDecimals] = useState(18); // Default to 18
+  const [decimals, setDecimals] = useState(18);
+  const [withdrawMode, setWithdrawMode] = useState('shares'); // 'shares' or 'lp'
 
   const vaultAddress = vault.vaultAddress;
   const wantAddress = vault.wantAddress;
@@ -26,6 +27,14 @@ export function VaultActions({ vault, onActionComplete }) {
     abi: ERC20_ABI,
     functionName: 'decimals',
     query: { enabled: !!wantAddress },
+  });
+
+  // Read price per share for LP conversion
+  const { data: pricePerShare } = useReadContract({
+    address: vaultAddress,
+    abi: VAULT_ABI,
+    functionName: 'pricePerShare',
+    query: { enabled: !!vaultAddress },
   });
 
   // Update decimals when fetched
@@ -87,7 +96,6 @@ export function VaultActions({ vault, onActionComplete }) {
       refetchLpBalance();
       refetchShareBalance();
       
-      // Record user action
       userActionApi.recordAction({
         vaultId: vault.id,
         userAddress: address.toLowerCase(),
@@ -108,12 +116,11 @@ export function VaultActions({ vault, onActionComplete }) {
       refetchLpBalance();
       refetchShareBalance();
       
-      // Record user action
       userActionApi.recordAction({
         vaultId: vault.id,
         userAddress: address.toLowerCase(),
         actionType: 'withdraw',
-        amount: parseUnits(withdrawAmount || '0', decimals).toString(),
+        amount: withdrawAmount,
         txHash: withdrawHash,
       }).catch(console.error);
       
@@ -121,6 +128,30 @@ export function VaultActions({ vault, onActionComplete }) {
       onActionComplete?.();
     }
   }, [isWithdrawSuccess, withdrawHash]);
+
+  // Convert LP amount to shares using pricePerShare
+  const lpToShares = (lpAmount) => {
+    if (!pricePerShare || pricePerShare === 0n) return 0n;
+    try {
+      const lpWei = parseUnits(lpAmount, decimals);
+      // shares = lpAmount * 1e18 / pricePerShare
+      return (lpWei * BigInt(10 ** decimals)) / pricePerShare;
+    } catch {
+      return 0n;
+    }
+  };
+
+  // Convert shares to LP amount using pricePerShare
+  const sharesToLp = (shares) => {
+    if (!pricePerShare) return '0';
+    try {
+      // lpAmount = shares * pricePerShare / 1e18
+      const lpWei = (shares * pricePerShare) / BigInt(10 ** decimals);
+      return formatUnits(lpWei, decimals);
+    } catch {
+      return '0';
+    }
+  };
 
   const needsApproval = () => {
     if (!depositAmount || !allowance) return false;
@@ -165,12 +196,25 @@ export function VaultActions({ vault, onActionComplete }) {
   const handleWithdraw = () => {
     if (!withdrawAmount) return;
     try {
-      const amount = parseUnits(withdrawAmount, decimals);
+      let sharesToWithdraw;
+      
+      if (withdrawMode === 'lp') {
+        // Convert LP amount to shares
+        sharesToWithdraw = lpToShares(withdrawAmount);
+        if (sharesToWithdraw === 0n) {
+          toast.error('Invalid amount or price per share unavailable');
+          return;
+        }
+      } else {
+        // Direct shares input
+        sharesToWithdraw = parseUnits(withdrawAmount, decimals);
+      }
+      
       withdraw({
         address: vaultAddress,
         abi: VAULT_ABI,
         functionName: 'withdraw',
-        args: [amount],
+        args: [sharesToWithdraw],
       });
     } catch (error) {
       toast.error('Invalid amount');
@@ -185,12 +229,30 @@ export function VaultActions({ vault, onActionComplete }) {
 
   const setMaxWithdraw = () => {
     if (shareBalance) {
-      setWithdrawAmount(formatUnits(shareBalance, decimals));
+      if (withdrawMode === 'lp') {
+        // Convert shares to LP value
+        setWithdrawAmount(sharesToLp(shareBalance));
+      } else {
+        setWithdrawAmount(formatUnits(shareBalance, decimals));
+      }
     }
+  };
+
+  const toggleWithdrawMode = () => {
+    setWithdrawAmount('');
+    setWithdrawMode(withdrawMode === 'shares' ? 'lp' : 'shares');
   };
 
   const formattedLpBalance = lpBalance ? formatUnits(lpBalance, decimals) : '0';
   const formattedShareBalance = shareBalance ? formatUnits(shareBalance, decimals) : '0';
+  const formattedSharesAsLp = shareBalance ? sharesToLp(shareBalance) : '0';
+  
+  // Calculate preview of conversion
+  const withdrawPreview = withdrawMode === 'lp' && withdrawAmount 
+    ? `≈ ${formatUnits(lpToShares(withdrawAmount), decimals)} shares`
+    : withdrawMode === 'shares' && withdrawAmount && pricePerShare
+    ? `≈ ${sharesToLp(parseUnits(withdrawAmount || '0', decimals))} LP`
+    : null;
 
   if (!isConnected) {
     return (
@@ -285,14 +347,29 @@ export function VaultActions({ vault, onActionComplete }) {
 
           <TabsContent value="withdraw" className="space-y-4">
             <div>
-              <div className="flex justify-between text-sm mb-2">
-                <span className="text-muted-foreground">Vault Shares</span>
+              <div className="flex justify-between items-center text-sm mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">
+                    {withdrawMode === 'shares' ? 'Vault Shares' : 'LP Amount'}
+                  </span>
+                  <button
+                    onClick={toggleWithdrawMode}
+                    className="text-xs text-primary hover:underline flex items-center gap-1"
+                    data-testid="toggle-withdraw-mode"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    {withdrawMode === 'shares' ? 'Use LP' : 'Use Shares'}
+                  </button>
+                </div>
                 <button 
                   onClick={setMaxWithdraw}
                   className="text-primary hover:underline font-mono"
                   data-testid="max-withdraw-btn"
                 >
-                  {parseFloat(formattedShareBalance).toFixed(6)} shares
+                  {withdrawMode === 'shares' 
+                    ? `${parseFloat(formattedShareBalance).toFixed(6)} shares`
+                    : `${parseFloat(formattedSharesAsLp).toFixed(6)} LP`
+                  }
                 </button>
               </div>
               <Input
@@ -303,6 +380,11 @@ export function VaultActions({ vault, onActionComplete }) {
                 className="font-mono text-lg h-12"
                 data-testid="withdraw-amount-input"
               />
+              {withdrawPreview && withdrawAmount && (
+                <p className="text-xs text-muted-foreground mt-1 font-mono">
+                  {withdrawPreview}
+                </p>
+              )}
             </div>
 
             <Button
@@ -320,7 +402,7 @@ export function VaultActions({ vault, onActionComplete }) {
               ) : (
                 <>
                   <ArrowUp className="w-4 h-4 mr-2" />
-                  Withdraw
+                  Withdraw {withdrawMode === 'lp' ? 'LP' : 'Shares'}
                 </>
               )}
             </Button>
