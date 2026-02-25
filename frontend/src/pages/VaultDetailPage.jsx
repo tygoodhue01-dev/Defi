@@ -263,8 +263,8 @@ export default function VaultDetailPage() {
                 />
                 <MetricBox
                   icon={TrendingUp}
-                  label="APY"
-                  value={formatPercent(metrics?.apy || 0)}
+                  label="Total APY"
+                  value={apyBreakdown?.totalApy != null ? formatPercent(apyBreakdown.totalApy) : formatPercent(metrics?.apy || 0)}
                   valueClass="text-green-400"
                   testId="vault-apy"
                 />
@@ -283,6 +283,42 @@ export default function VaultDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* APY Breakdown */}
+          {apyBreakdown && (
+            <Card className="bg-card border-border">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  APY Breakdown
+                  {apyBreakdown.dataQuality && apyBreakdown.dataQuality !== 'ok' && (
+                    <Badge 
+                      variant="outline"
+                      className={apyBreakdown.dataQuality === 'stale' 
+                        ? 'border-yellow-500/50 text-yellow-400 bg-yellow-500/10 text-[10px]' 
+                        : 'border-red-500/50 text-red-400 bg-red-500/10 text-[10px]'}
+                    >
+                      {apyBreakdown.dataQuality}
+                    </Badge>
+                  )}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <InfoRow label="Vault APR (net)" value={apyBreakdown.vaultApr != null ? formatPercent(apyBreakdown.vaultApr) : '-'} />
+                <InfoRow label="Vault APY (compounded)" value={apyBreakdown.vaultApy != null ? formatPercent(apyBreakdown.vaultApy) : '-'} />
+                <InfoRow label="Trading APR" value={apyBreakdown.tradingApr != null ? formatPercent(apyBreakdown.tradingApr) : '-'} />
+                <Separator />
+                <div className="flex justify-between items-center">
+                  <span className="text-sm font-medium">Total APY</span>
+                  <span className="text-sm font-bold text-green-400" data-testid="vault-total-apy">
+                    {apyBreakdown.totalApy != null ? formatPercent(apyBreakdown.totalApy) : '-'}
+                  </span>
+                </div>
+                <Separator />
+                <InfoRow label="Compoundings/Year" value={apyBreakdown.compoundingsPerYear?.toLocaleString() || '-'} mono />
+                <InfoRow label="Performance Fee" value={apyBreakdown.beefyPerformanceFee != null ? `${(apyBreakdown.beefyPerformanceFee * 100).toFixed(1)}%` : '-'} />
+              </CardContent>
+            </Card>
+          )}
 
           {/* Your Position */}
           {isConnected && (
