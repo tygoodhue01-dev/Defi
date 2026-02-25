@@ -16,6 +16,7 @@ from web3.exceptions import ContractLogicError
 import httpx
 
 from price_service import get_price_service, DataQuality
+from beefy_api import beefy_router, set_db as beefy_set_db
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
