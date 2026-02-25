@@ -61,7 +61,10 @@ def get_web3(chain_id: int) -> Web3:
     else:
         raise ValueError(f"Unsupported chain ID: {chain_id}")
 
-# Minimal ABIs for reading
+# ====================
+# Contract ABIs
+# ====================
+
 VAULT_ABI = [
     {"type": "function", "name": "totalAssets", "stateMutability": "view",
      "inputs": [], "outputs": [{"type": "uint256"}]},
@@ -83,15 +86,73 @@ ERC20_ABI = [
      "inputs": [], "outputs": [{"type": "uint8"}]},
     {"type": "function", "name": "totalSupply", "stateMutability": "view",
      "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "symbol", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "string"}]},
 ]
 
-# Simple LP price cache (in production, use Redis or proper cache)
-lp_price_cache = {}
+# Uniswap V2 Pair ABI
+UNISWAP_V2_PAIR_ABI = [
+    {"type": "function", "name": "getReserves", "stateMutability": "view",
+     "inputs": [], "outputs": [
+         {"name": "reserve0", "type": "uint112"},
+         {"name": "reserve1", "type": "uint112"},
+         {"name": "blockTimestampLast", "type": "uint32"}
+     ]},
+    {"type": "function", "name": "totalSupply", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "token0", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "address"}]},
+    {"type": "function", "name": "token1", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "address"}]},
+    {"type": "function", "name": "decimals", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint8"}]},
+]
+
+# MasterChef-style Farm ABI
+MASTERCHEF_ABI = [
+    {"type": "function", "name": "rewardPerBlock", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "rewardPerSecond", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "totalAllocPoint", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+    {"type": "function", "name": "poolInfo", "stateMutability": "view",
+     "inputs": [{"name": "pid", "type": "uint256"}],
+     "outputs": [
+         {"name": "lpToken", "type": "address"},
+         {"name": "allocPoint", "type": "uint256"},
+         {"name": "lastRewardBlock", "type": "uint256"},
+         {"name": "accRewardPerShare", "type": "uint256"}
+     ]},
+    {"type": "function", "name": "poolLength", "stateMutability": "view",
+     "inputs": [], "outputs": [{"type": "uint256"}]},
+]
+
+# ====================
+# Price Cache
+# ====================
+
+# Token price cache: {address: (price_usd, timestamp)}
+token_price_cache = {}
+PRICE_CACHE_TTL = 300  # 5 minutes
+PRICE_STALE_THRESHOLD = 600  # 10 minutes
+
+# Known token addresses on Base (for CoinGecko mapping)
+BASE_TOKEN_COINGECKO_IDS = {
+    "0x4200000000000000000000000000000000000006": "weth",  # WETH on Base
+    "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913": "usd-coin",  # USDC on Base
+    "0x50c5725949a6f0c72e6c4a641f24049a917db0cb": "dai",  # DAI on Base
+    "0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22": "coinbase-wrapped-staked-eth",  # cbETH
+}
+
+# ====================
+# Helper Functions
+# ====================
 
 def get_token_decimals(w3: Web3, token_address: str) -> int:
     """Read decimals from ERC20 token contract."""
     if not token_address or not w3.is_address(token_address):
-        return 18  # Default fallback
+        return 18
     try:
         contract = w3.eth.contract(
             address=w3.to_checksum_address(token_address),
@@ -100,70 +161,290 @@ def get_token_decimals(w3: Web3, token_address: str) -> int:
         return contract.functions.decimals().call()
     except Exception as e:
         logger.warning(f"Failed to read decimals for {token_address}: {e}")
-        return 18  # Default fallback
+        return 18
 
-async def get_lp_price_usd(lp_address: str, chain_id: int) -> float:
+async def fetch_token_price_coingecko(token_address: str, chain_id: int) -> tuple[float, str]:
     """
-    Get LP token price in USD.
-    For MVP: returns a reasonable estimate.
-    For production: integrate with DEX pricing or oracle.
+    Fetch token price from CoinGecko API.
+    Returns (price_usd, status) where status is 'ok', 'stale', or 'error'.
     """
-    cache_key = f"{chain_id}:{lp_address.lower()}"
+    cache_key = f"{chain_id}:{token_address.lower()}"
+    now = datetime.now(timezone.utc)
     
-    # Check cache (5 min TTL)
-    if cache_key in lp_price_cache:
-        cached_price, cached_time = lp_price_cache[cache_key]
-        if (datetime.now(timezone.utc) - cached_time).total_seconds() < 300:
-            return cached_price
+    # Check cache first
+    if cache_key in token_price_cache:
+        cached_price, cached_time = token_price_cache[cache_key]
+        age_seconds = (now - cached_time).total_seconds()
+        if age_seconds < PRICE_CACHE_TTL:
+            return cached_price, "ok"
+        elif age_seconds < PRICE_STALE_THRESHOLD:
+            return cached_price, "stale"
     
-    # For testnet, return mock price
+    # For testnet, return mock prices
     if chain_id == 84532:
-        price = 100.0  # Mock $100 per LP on testnet
-        lp_price_cache[cache_key] = (price, datetime.now(timezone.utc))
-        return price
+        mock_prices = {
+            "weth": 3000.0,
+            "usdc": 1.0,
+            "dai": 1.0,
+        }
+        # Return mock based on address patterns
+        token_price_cache[cache_key] = (100.0, now)
+        return 100.0, "ok"
     
-    # For mainnet, try to fetch from a pricing API
-    # This is a simplified approach - production would use DEX pool math
+    # Look up CoinGecko ID
+    coingecko_id = BASE_TOKEN_COINGECKO_IDS.get(token_address.lower())
+    
+    if not coingecko_id:
+        # Unknown token - try to fetch by contract address
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # CoinGecko API for Base tokens by contract
+                url = f"https://api.coingecko.com/api/v3/simple/token_price/base"
+                params = {
+                    "contract_addresses": token_address.lower(),
+                    "vs_currencies": "usd"
+                }
+                response = await client.get(url, params=params)
+                if response.status_code == 200:
+                    data = response.json()
+                    if token_address.lower() in data:
+                        price = data[token_address.lower()].get("usd", 0)
+                        if price > 0:
+                            token_price_cache[cache_key] = (price, now)
+                            return price, "ok"
+        except Exception as e:
+            logger.warning(f"CoinGecko contract lookup failed for {token_address}: {e}")
+        
+        # Return cached stale price if available
+        if cache_key in token_price_cache:
+            return token_price_cache[cache_key][0], "stale"
+        return 0.0, "error"
+    
+    # Fetch by CoinGecko ID
     try:
-        # Try CoinGecko or similar API for known tokens
-        # For unknown LPs, estimate based on underlying tokens
-        async with httpx.AsyncClient() as client:
-            # This is a placeholder - in production, implement proper LP pricing
-            # Options: 1) Query DEX pools, 2) Use LP token oracle, 3) Calculate from reserves
-            pass
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            url = "https://api.coingecko.com/api/v3/simple/price"
+            params = {
+                "ids": coingecko_id,
+                "vs_currencies": "usd"
+            }
+            response = await client.get(url, params=params)
+            if response.status_code == 200:
+                data = response.json()
+                if coingecko_id in data:
+                    price = data[coingecko_id].get("usd", 0)
+                    if price > 0:
+                        token_price_cache[cache_key] = (price, now)
+                        return price, "ok"
     except Exception as e:
-        logger.warning(f"Failed to fetch LP price: {e}")
+        logger.warning(f"CoinGecko price fetch failed for {coingecko_id}: {e}")
     
-    # Default fallback price for unknown LPs
-    price = 50.0
-    lp_price_cache[cache_key] = (price, datetime.now(timezone.utc))
-    return price
+    # Return cached stale price if available
+    if cache_key in token_price_cache:
+        return token_price_cache[cache_key][0], "stale"
+    return 0.0, "error"
 
-async def calculate_apy(
-    tvl_usd: float,
-    reward_token_price: float,
-    daily_rewards: float,
-    performance_fee: float = 0.045  # 4.5% default fee
+async def get_lp_token_price(
+    w3: Web3,
+    lp_address: str,
+    chain_id: int
+) -> tuple[float, str]:
+    """
+    Calculate Uniswap V2-style LP token price.
+    LP price = (reserve0 * price0 + reserve1 * price1) / totalSupply
+    Returns (price_usd, data_quality).
+    """
+    if not lp_address or not w3.is_address(lp_address):
+        return 0.0, "error"
+    
+    data_quality = "ok"
+    
+    try:
+        lp_contract = w3.eth.contract(
+            address=w3.to_checksum_address(lp_address),
+            abi=UNISWAP_V2_PAIR_ABI
+        )
+        
+        # Fetch LP data
+        try:
+            reserves = lp_contract.functions.getReserves().call()
+            reserve0, reserve1, _ = reserves
+        except Exception:
+            # Not a Uniswap V2 LP - might be a single token
+            # Fall back to direct price lookup
+            price, status = await fetch_token_price_coingecko(lp_address, chain_id)
+            return price, status
+        
+        total_supply = lp_contract.functions.totalSupply().call()
+        token0_address = lp_contract.functions.token0().call()
+        token1_address = lp_contract.functions.token1().call()
+        
+        if total_supply == 0:
+            return 0.0, "error"
+        
+        # Get token decimals
+        token0_decimals = get_token_decimals(w3, token0_address)
+        token1_decimals = get_token_decimals(w3, token1_address)
+        lp_decimals = get_token_decimals(w3, lp_address)
+        
+        # Normalize reserves
+        reserve0_normalized = reserve0 / (10 ** token0_decimals)
+        reserve1_normalized = reserve1 / (10 ** token1_decimals)
+        total_supply_normalized = total_supply / (10 ** lp_decimals)
+        
+        # Fetch token prices
+        price0, status0 = await fetch_token_price_coingecko(token0_address, chain_id)
+        price1, status1 = await fetch_token_price_coingecko(token1_address, chain_id)
+        
+        # Update data quality
+        if status0 == "error" or status1 == "error":
+            data_quality = "error"
+        elif status0 == "stale" or status1 == "stale":
+            data_quality = "stale"
+        
+        if price0 == 0 and price1 == 0:
+            return 0.0, "error"
+        
+        # Calculate LP price
+        # LP price = (reserve0 * price0 + reserve1 * price1) / totalSupply
+        total_value = (reserve0_normalized * price0) + (reserve1_normalized * price1)
+        lp_price = total_value / total_supply_normalized if total_supply_normalized > 0 else 0
+        
+        return lp_price, data_quality
+        
+    except Exception as e:
+        logger.error(f"Failed to calculate LP price for {lp_address}: {e}")
+        return 0.0, "error"
+
+async def get_farm_emissions(
+    w3: Web3,
+    farm_address: str,
+    lp_address: str,
+    reward_token_address: str,
+    chain_id: int
+) -> tuple[float, float, str]:
+    """
+    Fetch MasterChef-style farm emissions.
+    Returns (yearly_rewards, reward_token_price_usd, data_quality).
+    """
+    if not farm_address or not w3.is_address(farm_address):
+        return 0.0, 0.0, "error"
+    
+    data_quality = "ok"
+    
+    try:
+        farm_contract = w3.eth.contract(
+            address=w3.to_checksum_address(farm_address),
+            abi=MASTERCHEF_ABI
+        )
+        
+        # Try to get reward rate (different farms use different names)
+        reward_per_second = 0
+        reward_per_block = 0
+        
+        try:
+            reward_per_second = farm_contract.functions.rewardPerSecond().call()
+        except Exception:
+            pass
+        
+        if reward_per_second == 0:
+            try:
+                reward_per_block = farm_contract.functions.rewardPerBlock().call()
+            except Exception:
+                pass
+        
+        if reward_per_second == 0 and reward_per_block == 0:
+            logger.debug(f"No reward rate found for farm {farm_address}")
+            return 0.0, 0.0, "error"
+        
+        # Get allocation points
+        total_alloc_point = 1
+        pool_alloc_point = 1
+        
+        try:
+            total_alloc_point = farm_contract.functions.totalAllocPoint().call()
+        except Exception:
+            pass
+        
+        # Find the pool for our LP token
+        try:
+            pool_length = farm_contract.functions.poolLength().call()
+            for pid in range(min(pool_length, 50)):  # Limit search
+                try:
+                    pool_info = farm_contract.functions.poolInfo(pid).call()
+                    if pool_info[0].lower() == lp_address.lower():
+                        pool_alloc_point = pool_info[1]
+                        break
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        
+        # Calculate pool's share of rewards
+        pool_share = pool_alloc_point / total_alloc_point if total_alloc_point > 0 else 0
+        
+        # Get reward token decimals
+        reward_decimals = get_token_decimals(w3, reward_token_address) if reward_token_address else 18
+        
+        # Calculate yearly rewards
+        if reward_per_second > 0:
+            seconds_per_year = 365 * 24 * 60 * 60
+            yearly_rewards_raw = reward_per_second * seconds_per_year * pool_share
+        else:
+            # Assume ~2 second block time for Base
+            blocks_per_year = (365 * 24 * 60 * 60) / 2
+            yearly_rewards_raw = reward_per_block * blocks_per_year * pool_share
+        
+        yearly_rewards = yearly_rewards_raw / (10 ** reward_decimals)
+        
+        # Get reward token price
+        reward_price, price_status = await fetch_token_price_coingecko(
+            reward_token_address, chain_id
+        ) if reward_token_address else (0.0, "error")
+        
+        if price_status != "ok":
+            data_quality = price_status
+        
+        return yearly_rewards, reward_price, data_quality
+        
+    except Exception as e:
+        logger.error(f"Failed to get farm emissions for {farm_address}: {e}")
+        return 0.0, 0.0, "error"
+
+def calculate_apy_from_apr(
+    apr: float,
+    compounds_per_day: int = 4,
+    performance_fee: float = 0.045
 ) -> float:
     """
-    Calculate APY from emission rate.
-    APY = ((1 + daily_rate) ^ 365 - 1) * 100
+    Convert APR to APY with compounding and fees.
     
-    daily_rate = (daily_rewards * reward_price) / TVL
+    Args:
+        apr: Annual Percentage Rate (as decimal, e.g., 0.5 for 50%)
+        compounds_per_day: Number of harvests per day
+        performance_fee: Fee taken from rewards (e.g., 0.045 for 4.5%)
+    
+    Returns:
+        APY as percentage (e.g., 50.0 for 50%)
     """
-    if tvl_usd <= 0:
+    if apr <= 0:
         return 0.0
     
-    daily_reward_usd = daily_rewards * reward_token_price
-    daily_rate = daily_reward_usd / tvl_usd
+    # Apply performance fee to APR
+    apr_after_fee = apr * (1 - performance_fee)
     
-    # Apply performance fee
-    daily_rate_after_fee = daily_rate * (1 - performance_fee)
+    # Compounds per year
+    n = compounds_per_day * 365
     
-    # Compound daily for APY
-    apy = ((1 + daily_rate_after_fee) ** 365 - 1) * 100
+    # APY = (1 + APR/n)^n - 1
+    # Using the compound interest formula
+    try:
+        apy = ((1 + apr_after_fee / n) ** n - 1) * 100
+    except (OverflowError, ValueError):
+        # If APR is too high, cap it
+        apy = 10000.0
     
-    # Cap at reasonable max
+    # Cap at reasonable maximum
     return min(apy, 10000.0)
 
 async def read_vault_on_chain(vault: dict) -> dict:
@@ -194,7 +475,6 @@ async def read_vault_on_chain(vault: dict) -> dict:
         # Get want token decimals
         result['decimals'] = get_token_decimals(w3, want_address)
         
-        # Validate addresses
         if not w3.is_address(vault_address):
             logger.warning(f"Invalid vault address: {vault_address}")
             return result
@@ -207,17 +487,42 @@ async def read_vault_on_chain(vault: dict) -> dict:
         # Read vault data
         try:
             result['totalAssets'] = vault_contract.functions.totalAssets().call()
-        except ContractLogicError:
+        except (ContractLogicError, Exception):
             logger.debug(f"totalAssets not available on vault {vault_address}")
         
         try:
             result['pricePerShare'] = vault_contract.functions.pricePerShare().call()
-        except ContractLogicError:
+        except (ContractLogicError, Exception):
             logger.debug(f"pricePerShare not available on vault {vault_address}")
         
         try:
             result['totalSupply'] = vault_contract.functions.totalSupply().call()
-        except ContractLogicError:
+        except (ContractLogicError, Exception):
+            logger.debug(f"totalSupply not available on vault {vault_address}")
+        
+        # Read strategy data if address provided
+        if strategy_address and w3.is_address(strategy_address):
+            strategy_contract = w3.eth.contract(
+                address=w3.to_checksum_address(strategy_address),
+                abi=STRATEGY_ABI
+            )
+            
+            try:
+                result['strategyBalance'] = strategy_contract.functions.balanceOf().call()
+            except (ContractLogicError, Exception):
+                pass
+            
+            try:
+                last_harvest_ts = strategy_contract.functions.lastHarvest().call()
+                if last_harvest_ts > 0:
+                    result['lastHarvest'] = datetime.fromtimestamp(last_harvest_ts, tz=timezone.utc).isoformat()
+            except (ContractLogicError, Exception):
+                pass
+        
+    except Exception as e:
+        logger.error(f"Error reading vault on-chain data: {e}")
+    
+    return result
             logger.debug(f"totalSupply not available on vault {vault_address}")
         
         # Read strategy data if address provided
