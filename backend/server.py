@@ -783,50 +783,101 @@ async def get_vault_metrics(vault_id: str):
 async def refresh_vault_metrics(vault_id: str):
     """
     Refresh metrics from on-chain data.
-    Reads vault contract, calculates TVL in USD, estimates APY.
+    - Reads vault totalAssets and pricePerShare
+    - Calculates LP price from Uniswap V2 reserves
+    - Fetches farm emissions for APR
+    - Converts APR to APY with compounding
+    - Tracks data quality status
     """
     vault = await db.vaults.find_one({"id": vault_id}, {"_id": 0})
     if not vault:
         raise HTTPException(status_code=404, detail="Vault not found")
     
-    # Read on-chain data (includes decimals from want token)
+    chain_id = vault.get('chainId', 84532)
+    want_address = vault.get('wantAddress', '')
+    farm_address = vault.get('farmAddress', '')
+    reward_token = vault.get('rewardToken', '')
+    
+    # Initialize data quality tracking
+    data_quality = "ok"
+    quality_issues = []
+    
+    try:
+        w3 = get_web3(chain_id)
+    except Exception as e:
+        logger.error(f"Failed to connect to chain {chain_id}: {e}")
+        return {"error": "Failed to connect to blockchain", "dataQuality": "error"}
+    
+    # Read on-chain vault data
     on_chain = await read_vault_on_chain(vault)
     decimals = on_chain['decimals']
     divisor = 10 ** decimals
     
-    # Get LP price for TVL calculation
-    lp_price = await get_lp_price_usd(
-        vault.get('wantAddress', ''),
-        vault.get('chainId', 84532)
-    )
-    
-    # Normalize using want token decimals
+    # Normalize vault values
     total_assets_normalized = on_chain['totalAssets'] / divisor if on_chain['totalAssets'] > 0 else 0
-    tvl_usd = total_assets_normalized * lp_price
-    
-    # Normalize price per share using want token decimals
     price_per_share_normalized = on_chain['pricePerShare'] / divisor if on_chain['pricePerShare'] > 0 else 1.0
     
-    # Estimate APY (simplified for MVP)
-    estimated_daily_rewards = total_assets_normalized * 0.0001  # ~3.65% base APR assumption
-    reward_token_price = 1.0  # Placeholder
+    # Calculate LP token price
+    lp_price, lp_price_quality = await get_lp_token_price(w3, want_address, chain_id)
     
-    apy = await calculate_apy(
-        tvl_usd=tvl_usd,
-        reward_token_price=reward_token_price,
-        daily_rewards=estimated_daily_rewards,
-        performance_fee=0.045
-    )
+    if lp_price_quality == "error":
+        quality_issues.append("lp_price_error")
+        lp_price = 0.0
+    elif lp_price_quality == "stale":
+        quality_issues.append("lp_price_stale")
+    
+    # Calculate TVL
+    tvl_usd = total_assets_normalized * lp_price
+    
+    # Get farm emissions and calculate APR/APY
+    apr = 0.0
+    apy = 0.0
+    yearly_rewards_usd = 0.0
+    reward_price = 0.0
+    
+    if farm_address and tvl_usd > 0:
+        yearly_rewards, reward_price, farm_quality = await get_farm_emissions(
+            w3, farm_address, want_address, reward_token, chain_id
+        )
+        
+        if farm_quality == "error":
+            quality_issues.append("farm_data_error")
+        elif farm_quality == "stale":
+            quality_issues.append("farm_data_stale")
+        
+        yearly_rewards_usd = yearly_rewards * reward_price
+        
+        # APR = (yearly_rewards_usd / TVL)
+        if tvl_usd > 0:
+            apr = yearly_rewards_usd / tvl_usd  # As decimal (e.g., 0.5 for 50%)
+            
+            # Convert APR to APY (4 compounds per day, 4.5% performance fee)
+            apy = calculate_apy_from_apr(
+                apr=apr,
+                compounds_per_day=4,
+                performance_fee=0.045
+            )
+    
+    # Determine final data quality
+    if "error" in str(quality_issues):
+        data_quality = "error"
+    elif quality_issues:
+        data_quality = "stale"
     
     # Use on-chain lastHarvest if available
     last_harvest_at = on_chain.get('lastHarvest')
     
     update_data = {
         "tvl": str(round(tvl_usd, 2)),
+        "apr": str(round(apr * 100, 2)),  # Store as percentage
         "apy": str(round(apy, 2)),
         "pricePerShare": str(round(price_per_share_normalized, 6)),
         "totalSupply": str(on_chain.get('totalSupply', 0)),
         "decimals": decimals,
+        "lpPrice": str(round(lp_price, 6)),
+        "rewardPrice": str(round(reward_price, 4)),
+        "yearlyRewardsUsd": str(round(yearly_rewards_usd, 2)),
+        "dataQuality": data_quality,
         "updatedAt": datetime.now(timezone.utc).isoformat()
     }
     
@@ -838,6 +889,9 @@ async def refresh_vault_metrics(vault_id: str):
         {"$set": update_data},
         upsert=True
     )
+    
+    metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
+    return metrics
     
     metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
     return metrics
