@@ -544,13 +544,10 @@ async def get_vault_metrics(vault_id: str):
 @api_router.post("/vaults/{vault_id}/metrics/refresh")
 async def refresh_vault_metrics(vault_id: str):
     """
-    Refresh metrics from on-chain data.
-    - Reads vault totalAssets and pricePerShare
-    - Calculates LP price from Uniswap V2 reserves
-    - Fetches farm emissions for APR
-    - Converts APR to APY with compounding
-    - Tracks data quality status
+    Refresh metrics from on-chain data using the price service.
     """
+    price_service = get_price_service()
+    
     vault = await db.vaults.find_one({"id": vault_id}, {"_id": 0})
     if not vault:
         raise HTTPException(status_code=404, detail="Vault not found")
@@ -561,7 +558,7 @@ async def refresh_vault_metrics(vault_id: str):
     reward_token = vault.get('rewardToken', '')
     
     # Initialize data quality tracking
-    data_quality = "ok"
+    data_quality = DataQuality.OK
     quality_issues = []
     
     try:
@@ -579,13 +576,13 @@ async def refresh_vault_metrics(vault_id: str):
     total_assets_normalized = on_chain['totalAssets'] / divisor if on_chain['totalAssets'] > 0 else 0
     price_per_share_normalized = on_chain['pricePerShare'] / divisor if on_chain['pricePerShare'] > 0 else 1.0
     
-    # Calculate LP token price
-    lp_price, lp_price_quality = await get_lp_token_price(w3, want_address, chain_id)
+    # Calculate LP token price using price service
+    lp_price, lp_price_quality = await price_service.get_lp_price(w3, want_address, chain_id)
     
-    if lp_price_quality == "error":
+    if lp_price_quality == DataQuality.ERROR:
         quality_issues.append("lp_price_error")
         lp_price = 0.0
-    elif lp_price_quality == "stale":
+    elif lp_price_quality == DataQuality.STALE:
         quality_issues.append("lp_price_stale")
     
     # Calculate TVL
@@ -602,36 +599,28 @@ async def refresh_vault_metrics(vault_id: str):
             w3, farm_address, want_address, reward_token, chain_id
         )
         
-        if farm_quality == "error":
+        if farm_quality == DataQuality.ERROR:
             quality_issues.append("farm_data_error")
-        elif farm_quality == "stale":
+        elif farm_quality == DataQuality.STALE:
             quality_issues.append("farm_data_stale")
         
         yearly_rewards_usd = yearly_rewards * reward_price
         
-        # APR = (yearly_rewards_usd / TVL)
         if tvl_usd > 0:
-            apr = yearly_rewards_usd / tvl_usd  # As decimal (e.g., 0.5 for 50%)
-            
-            # Convert APR to APY (4 compounds per day, 4.5% performance fee)
-            apy = calculate_apy_from_apr(
-                apr=apr,
-                compounds_per_day=4,
-                performance_fee=0.045
-            )
+            apr = yearly_rewards_usd / tvl_usd
+            apy = calculate_apy_from_apr(apr=apr, compounds_per_day=4, performance_fee=0.045)
     
     # Determine final data quality
-    if "error" in str(quality_issues):
-        data_quality = "error"
+    if any("error" in issue for issue in quality_issues):
+        data_quality = DataQuality.ERROR
     elif quality_issues:
-        data_quality = "stale"
+        data_quality = DataQuality.STALE
     
-    # Use on-chain lastHarvest if available
     last_harvest_at = on_chain.get('lastHarvest')
     
     update_data = {
         "tvl": str(round(tvl_usd, 2)),
-        "apr": str(round(apr * 100, 2)),  # Store as percentage
+        "apr": str(round(apr * 100, 2)),
         "apy": str(round(apy, 2)),
         "pricePerShare": str(round(price_per_share_normalized, 6)),
         "totalSupply": str(on_chain.get('totalSupply', 0)),
@@ -639,7 +628,7 @@ async def refresh_vault_metrics(vault_id: str):
         "lpPrice": str(round(lp_price, 6)),
         "rewardPrice": str(round(reward_price, 4)),
         "yearlyRewardsUsd": str(round(yearly_rewards_usd, 2)),
-        "dataQuality": data_quality,
+        "dataQuality": data_quality.value,
         "updatedAt": datetime.now(timezone.utc).isoformat()
     }
     
@@ -648,6 +637,12 @@ async def refresh_vault_metrics(vault_id: str):
     
     await db.vault_metrics.update_one(
         {"vaultId": vault_id},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    metrics = await db.vault_metrics.find_one({"vaultId": vault_id}, {"_id": 0})
+    return metrics
         {"$set": update_data},
         upsert=True
     )
