@@ -169,18 +169,20 @@ async def calculate_apy(
 async def read_vault_on_chain(vault: dict) -> dict:
     """
     Read on-chain data from vault and strategy contracts.
-    Returns dict with totalAssets, pricePerShare, lastHarvest, etc.
+    Returns dict with totalAssets, pricePerShare, lastHarvest, decimals, etc.
     """
     chain_id = vault.get('chainId', 84532)
     vault_address = vault.get('vaultAddress', '')
     strategy_address = vault.get('strategyAddress', '')
+    want_address = vault.get('wantAddress', '')
     
     result = {
         'totalAssets': 0,
-        'pricePerShare': 1e18,  # Default 1.0 in 18 decimals
+        'pricePerShare': 0,
         'totalSupply': 0,
         'lastHarvest': None,
         'strategyBalance': 0,
+        'decimals': 18,
     }
     
     if not vault_address:
@@ -188,6 +190,9 @@ async def read_vault_on_chain(vault: dict) -> dict:
     
     try:
         w3 = get_web3(chain_id)
+        
+        # Get want token decimals
+        result['decimals'] = get_token_decimals(w3, want_address)
         
         # Validate addresses
         if not w3.is_address(vault_address):
