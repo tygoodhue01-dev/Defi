@@ -609,9 +609,15 @@ class VaultMetrics(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     vaultId: str
     tvl: str = "0"  # Total Value Locked in USD
-    apy: str = "0"  # Annual Percentage Yield
+    apr: str = "0"  # Annual Percentage Rate
+    apy: str = "0"  # Annual Percentage Yield (with compounding)
     pricePerShare: str = "1"
     totalSupply: str = "0"
+    decimals: int = 18
+    lpPrice: str = "0"  # LP token price in USD
+    rewardPrice: str = "0"  # Reward token price in USD
+    yearlyRewardsUsd: str = "0"  # Yearly rewards in USD
+    dataQuality: str = "ok"  # "ok", "stale", or "error"
     lastHarvestAt: Optional[str] = None
     lastHarvestTx: Optional[str] = None
     updatedAt: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
