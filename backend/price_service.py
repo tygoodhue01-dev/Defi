@@ -7,12 +7,13 @@ Features:
 - In-memory cache with TTL
 - Rate limiting for API calls
 - Data quality tracking
+- Beefy-style batch price endpoints
 """
 
 import asyncio
 import logging
 from datetime import datetime, timezone
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, List
 from dataclasses import dataclass, field
 from enum import Enum
 import httpx
@@ -69,10 +70,7 @@ class PriceService:
     """
     Centralized price service with caching and rate limiting.
     
-    Usage:
-        service = PriceService()
-        price, quality = await service.get_token_price(address, chain_id)
-        lp_price, quality = await service.get_lp_price(w3, lp_address, chain_id)
+    Supports Beefy-style batch endpoints for prices and LP prices.
     """
     
     # Cache TTL settings (in seconds)
@@ -88,12 +86,13 @@ class PriceService:
         "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca": "bridged-usd-coin-base",
     }
     
-    # Testnet mock prices
+    # Testnet mock prices - ONLY used on testnet (chain 84532)
     TESTNET_MOCK_PRICES = {
         "weth": 3000.0,
         "usdc": 1.0,
         "dai": 1.0,
-        "default": 100.0,
+        "default_token": 100.0,
+        "default_lp": 200.0,
     }
     
     # ABIs
@@ -122,7 +121,9 @@ class PriceService:
     ]
     
     def __init__(self):
-        self._cache: Dict[str, CacheEntry] = {}
+        self._token_cache: Dict[str, CacheEntry] = {}
+        self._lp_cache: Dict[str, CacheEntry] = {}
+        self._decimals_cache: Dict[str, int] = {}
         self._rate_limiter = RateLimiter(max_tokens=10, refill_rate=1.0)
         self._http_client: Optional[httpx.AsyncClient] = None
     
@@ -137,16 +138,16 @@ class PriceService:
         if self._http_client and not self._http_client.is_closed:
             await self._http_client.aclose()
     
-    def _cache_key(self, prefix: str, address: str, chain_id: int) -> str:
+    def _cache_key(self, chain_id: int, address: str) -> str:
         """Generate cache key."""
-        return f"{prefix}:{chain_id}:{address.lower()}"
+        return f"{chain_id}:{address.lower()}"
     
-    def _get_cached(self, key: str) -> Optional[Tuple[Any, DataQuality]]:
-        """Get cached value with quality status."""
-        if key not in self._cache:
+    def _get_cached_token(self, key: str) -> Optional[Tuple[float, DataQuality]]:
+        """Get cached token price with quality status."""
+        if key not in self._token_cache:
             return None
         
-        entry = self._cache[key]
+        entry = self._token_cache[key]
         age = (datetime.now(timezone.utc) - entry.timestamp).total_seconds()
         
         if age < self.CACHE_TTL:
@@ -156,23 +157,45 @@ class PriceService:
         
         return None
     
-    def _set_cached(self, key: str, value: Any, quality: DataQuality = DataQuality.OK):
-        """Set cache entry."""
-        self._cache[key] = CacheEntry(
+    def _get_cached_lp(self, key: str) -> Optional[Tuple[float, DataQuality]]:
+        """Get cached LP price with quality status."""
+        if key not in self._lp_cache:
+            return None
+        
+        entry = self._lp_cache[key]
+        age = (datetime.now(timezone.utc) - entry.timestamp).total_seconds()
+        
+        if age < self.CACHE_TTL:
+            return entry.value, DataQuality.OK
+        elif age < self.STALE_THRESHOLD:
+            return entry.value, DataQuality.STALE
+        
+        return None
+    
+    def _set_cached_token(self, key: str, value: float, quality: DataQuality = DataQuality.OK):
+        """Set token price cache entry."""
+        self._token_cache[key] = CacheEntry(
+            value=value,
+            timestamp=datetime.now(timezone.utc),
+            quality=quality
+        )
+    
+    def _set_cached_lp(self, key: str, value: float, quality: DataQuality = DataQuality.OK):
+        """Set LP price cache entry."""
+        self._lp_cache[key] = CacheEntry(
             value=value,
             timestamp=datetime.now(timezone.utc),
             quality=quality
         )
     
     def get_token_decimals(self, w3: Web3, token_address: str) -> int:
-        """Read decimals from ERC20 token contract."""
+        """Read decimals from ERC20 token contract (cached)."""
         if not token_address or not w3.is_address(token_address):
             return 18
         
-        cache_key = self._cache_key("decimals", token_address, 0)
-        cached = self._get_cached(cache_key)
-        if cached:
-            return cached[0]
+        addr_lower = token_address.lower()
+        if addr_lower in self._decimals_cache:
+            return self._decimals_cache[addr_lower]
         
         try:
             contract = w3.eth.contract(
@@ -180,45 +203,50 @@ class PriceService:
                 abi=self.ERC20_ABI
             )
             decimals = contract.functions.decimals().call()
-            self._set_cached(cache_key, decimals)
+            self._decimals_cache[addr_lower] = decimals
             return decimals
         except Exception as e:
             logger.warning(f"Failed to read decimals for {token_address}: {e}")
             return 18
     
+    def is_testnet(self, chain_id: int) -> bool:
+        """Check if chain is testnet."""
+        return chain_id == 84532
+    
     async def get_token_price(
         self,
         token_address: str,
         chain_id: int
-    ) -> Tuple[float, DataQuality]:
+    ) -> Tuple[Optional[float], DataQuality]:
         """
         Get token price in USD from CoinGecko.
         
         Returns:
-            Tuple of (price_usd, data_quality)
+            Tuple of (price_usd or None, data_quality)
+            Returns None for price if data unavailable (not a guess)
         """
         if not token_address:
-            return 0.0, DataQuality.ERROR
+            return None, DataQuality.ERROR
         
-        cache_key = self._cache_key("price", token_address, chain_id)
+        cache_key = self._cache_key(chain_id, token_address)
         
         # Check cache
-        cached = self._get_cached(cache_key)
+        cached = self._get_cached_token(cache_key)
         if cached:
             return cached
         
         # Testnet: return mock prices
-        if chain_id == 84532:
-            price = self.TESTNET_MOCK_PRICES.get("default", 100.0)
-            self._set_cached(cache_key, price)
+        if self.is_testnet(chain_id):
+            price = self.TESTNET_MOCK_PRICES.get("default_token", 100.0)
+            self._set_cached_token(cache_key, price)
             return price, DataQuality.OK
         
+        # Production: fetch real prices
         # Rate limit check
         if not await self._rate_limiter.acquire():
-            # Return stale cache if available
-            if cache_key in self._cache:
-                return self._cache[cache_key].value, DataQuality.STALE
-            return 0.0, DataQuality.ERROR
+            if cache_key in self._token_cache:
+                return self._token_cache[cache_key].value, DataQuality.STALE
+            return None, DataQuality.ERROR
         
         # Try CoinGecko by ID first
         coingecko_id = self.BASE_MAINNET_TOKENS.get(token_address.lower())
@@ -227,7 +255,6 @@ class PriceService:
             client = await self._get_client()
             
             if coingecko_id:
-                # Fetch by CoinGecko ID
                 url = "https://api.coingecko.com/api/v3/simple/price"
                 params = {"ids": coingecko_id, "vs_currencies": "usd"}
                 response = await client.get(url, params=params)
@@ -236,7 +263,7 @@ class PriceService:
                     data = response.json()
                     if coingecko_id in data and "usd" in data[coingecko_id]:
                         price = data[coingecko_id]["usd"]
-                        self._set_cached(cache_key, price)
+                        self._set_cached_token(cache_key, price)
                         return price, DataQuality.OK
             
             # Try by contract address
@@ -249,54 +276,53 @@ class PriceService:
                 addr_lower = token_address.lower()
                 if addr_lower in data and "usd" in data[addr_lower]:
                     price = data[addr_lower]["usd"]
-                    self._set_cached(cache_key, price)
+                    self._set_cached_token(cache_key, price)
                     return price, DataQuality.OK
             
-            # Rate limited
             if response.status_code == 429:
                 logger.warning("CoinGecko rate limit hit")
-                if cache_key in self._cache:
-                    return self._cache[cache_key].value, DataQuality.STALE
+                if cache_key in self._token_cache:
+                    return self._token_cache[cache_key].value, DataQuality.STALE
                     
         except Exception as e:
             logger.error(f"CoinGecko API error for {token_address}: {e}")
         
-        # Return stale cache or error
-        if cache_key in self._cache:
-            return self._cache[cache_key].value, DataQuality.STALE
+        # Return stale cache or None (not a guess)
+        if cache_key in self._token_cache:
+            return self._token_cache[cache_key].value, DataQuality.STALE
         
-        return 0.0, DataQuality.ERROR
+        return None, DataQuality.ERROR
     
     async def get_lp_price(
         self,
         w3: Web3,
         lp_address: str,
         chain_id: int
-    ) -> Tuple[float, DataQuality]:
+    ) -> Tuple[Optional[float], DataQuality]:
         """
         Calculate Uniswap V2-style LP token price.
         
-        LP price = (reserve0 * price0 + reserve1 * price1) / totalSupply
-        
         Returns:
-            Tuple of (price_usd, data_quality)
+            Tuple of (price_usd or None, data_quality)
+            Returns None if calculation fails (not a guess)
         """
         if not lp_address or not w3.is_address(lp_address):
-            return 0.0, DataQuality.ERROR
+            return None, DataQuality.ERROR
         
-        cache_key = self._cache_key("lp", lp_address, chain_id)
+        cache_key = self._cache_key(chain_id, lp_address)
         
         # Check cache
-        cached = self._get_cached(cache_key)
+        cached = self._get_cached_lp(cache_key)
         if cached:
             return cached
         
         # Testnet: return mock price
-        if chain_id == 84532:
-            price = self.TESTNET_MOCK_PRICES.get("default", 100.0)
-            self._set_cached(cache_key, price)
+        if self.is_testnet(chain_id):
+            price = self.TESTNET_MOCK_PRICES.get("default_lp", 200.0)
+            self._set_cached_lp(cache_key, price)
             return price, DataQuality.OK
         
+        # Production: calculate from reserves
         quality = DataQuality.OK
         
         try:
@@ -305,7 +331,7 @@ class PriceService:
                 abi=self.UNISWAP_V2_PAIR_ABI
             )
             
-            # Try to get reserves (this determines if it's an LP token)
+            # Try to get reserves
             try:
                 reserves = lp_contract.functions.getReserves().call()
                 reserve0, reserve1, _ = reserves
@@ -313,10 +339,10 @@ class PriceService:
                 # Not a Uniswap V2 LP - try direct price lookup
                 return await self.get_token_price(lp_address, chain_id)
             
-            # Get LP token data
+            # Get LP data
             total_supply = lp_contract.functions.totalSupply().call()
             if total_supply == 0:
-                return 0.0, DataQuality.ERROR
+                return None, DataQuality.ERROR
             
             token0_address = lp_contract.functions.token0().call()
             token1_address = lp_contract.functions.token1().call()
@@ -335,124 +361,149 @@ class PriceService:
             price0, quality0 = await self.get_token_price(token0_address, chain_id)
             price1, quality1 = await self.get_token_price(token1_address, chain_id)
             
-            # Update quality based on token prices
+            # Check if we have valid prices
+            if price0 is None and price1 is None:
+                return None, DataQuality.ERROR
+            
+            # Update quality
             if quality0 == DataQuality.ERROR or quality1 == DataQuality.ERROR:
                 quality = DataQuality.ERROR
             elif quality0 == DataQuality.STALE or quality1 == DataQuality.STALE:
                 quality = DataQuality.STALE
             
-            if price0 == 0 and price1 == 0:
-                return 0.0, DataQuality.ERROR
+            # Use 0 for missing prices
+            price0 = price0 or 0
+            price1 = price1 or 0
             
             # Calculate LP price
             total_value = (reserve0_norm * price0) + (reserve1_norm * price1)
             lp_price = total_value / total_supply_norm if total_supply_norm > 0 else 0
             
-            self._set_cached(cache_key, lp_price, quality)
-            return lp_price, quality
+            if lp_price > 0:
+                self._set_cached_lp(cache_key, lp_price, quality)
+                return lp_price, quality
+            
+            return None, DataQuality.ERROR
             
         except Exception as e:
             logger.error(f"Failed to calculate LP price for {lp_address}: {e}")
             
-            # Return stale cache if available
-            if cache_key in self._cache:
-                return self._cache[cache_key].value, DataQuality.STALE
+            if cache_key in self._lp_cache:
+                return self._lp_cache[cache_key].value, DataQuality.STALE
             
-            return 0.0, DataQuality.ERROR
+            return None, DataQuality.ERROR
     
-    async def get_prices_batch(
+    # ====================
+    # Beefy-style Batch Endpoints
+    # ====================
+    
+    def get_all_token_prices(self, chain_id: int) -> Dict[str, Any]:
+        """
+        Get all cached token prices for a chain (Beefy /prices style).
+        Returns: {address: price} map
+        """
+        result = {}
+        prefix = f"{chain_id}:"
+        
+        for key, entry in self._token_cache.items():
+            if key.startswith(prefix):
+                address = key[len(prefix):]
+                age = (datetime.now(timezone.utc) - entry.timestamp).total_seconds()
+                if age < self.STALE_THRESHOLD:
+                    result[address] = entry.value
+        
+        return result
+    
+    def get_all_lp_prices(self, chain_id: int) -> Dict[str, Any]:
+        """
+        Get all cached LP prices for a chain (Beefy /lps style).
+        Returns: {address: price} map
+        """
+        result = {}
+        prefix = f"{chain_id}:"
+        
+        for key, entry in self._lp_cache.items():
+            if key.startswith(prefix):
+                address = key[len(prefix):]
+                age = (datetime.now(timezone.utc) - entry.timestamp).total_seconds()
+                if age < self.STALE_THRESHOLD:
+                    result[address] = entry.value
+        
+        return result
+    
+    async def refresh_prices_for_vaults(
         self,
-        token_addresses: list,
+        w3: Web3,
+        vaults: List[Dict],
         chain_id: int
-    ) -> Dict[str, Tuple[float, DataQuality]]:
+    ) -> Dict[str, DataQuality]:
         """
-        Get prices for multiple tokens efficiently.
-        Groups requests to minimize API calls.
+        Refresh prices for all tokens and LPs used by vaults.
+        Returns quality status per address.
         """
-        results = {}
-        uncached = []
+        quality_map = {}
         
-        # Check cache first
-        for addr in token_addresses:
-            cache_key = self._cache_key("price", addr, chain_id)
-            cached = self._get_cached(cache_key)
-            if cached:
-                results[addr.lower()] = cached
-            else:
-                uncached.append(addr)
+        # Collect all unique addresses
+        token_addresses = set()
+        lp_addresses = set()
         
-        if not uncached:
-            return results
+        for vault in vaults:
+            if vault.get('chainId') == chain_id:
+                want = vault.get('wantAddress', '')
+                reward = vault.get('rewardToken', '')
+                
+                if want:
+                    lp_addresses.add(want)
+                if reward:
+                    token_addresses.add(reward)
         
-        # Testnet: return mock prices
-        if chain_id == 84532:
-            for addr in uncached:
-                price = self.TESTNET_MOCK_PRICES.get("default", 100.0)
-                results[addr.lower()] = (price, DataQuality.OK)
-                self._set_cached(self._cache_key("price", addr, chain_id), price)
-            return results
+        # Fetch LP prices (which also fetches underlying token prices)
+        for lp_addr in lp_addresses:
+            price, quality = await self.get_lp_price(w3, lp_addr, chain_id)
+            quality_map[lp_addr.lower()] = quality
         
-        # Batch fetch from CoinGecko
-        if not await self._rate_limiter.acquire():
-            for addr in uncached:
-                results[addr.lower()] = (0.0, DataQuality.ERROR)
-            return results
+        # Fetch remaining token prices
+        for token_addr in token_addresses:
+            if token_addr.lower() not in quality_map:
+                price, quality = await self.get_token_price(token_addr, chain_id)
+                quality_map[token_addr.lower()] = quality
         
-        try:
-            client = await self._get_client()
-            
-            # Fetch by contract addresses
-            addresses_str = ",".join(a.lower() for a in uncached)
-            url = "https://api.coingecko.com/api/v3/simple/token_price/base"
-            params = {"contract_addresses": addresses_str, "vs_currencies": "usd"}
-            response = await client.get(url, params=params)
-            
-            if response.status_code == 200:
-                data = response.json()
-                for addr in uncached:
-                    addr_lower = addr.lower()
-                    if addr_lower in data and "usd" in data[addr_lower]:
-                        price = data[addr_lower]["usd"]
-                        results[addr_lower] = (price, DataQuality.OK)
-                        self._set_cached(self._cache_key("price", addr, chain_id), price)
-                    else:
-                        results[addr_lower] = (0.0, DataQuality.ERROR)
-            else:
-                for addr in uncached:
-                    results[addr.lower()] = (0.0, DataQuality.ERROR)
-                    
-        except Exception as e:
-            logger.error(f"Batch price fetch failed: {e}")
-            for addr in uncached:
-                results[addr.lower()] = (0.0, DataQuality.ERROR)
-        
-        return results
+        return quality_map
     
     def clear_cache(self):
-        """Clear all cached prices."""
-        self._cache.clear()
+        """Clear all caches."""
+        self._token_cache.clear()
+        self._lp_cache.clear()
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics."""
         now = datetime.now(timezone.utc)
-        fresh = 0
-        stale = 0
-        expired = 0
         
-        for entry in self._cache.values():
-            age = (now - entry.timestamp).total_seconds()
-            if age < self.CACHE_TTL:
-                fresh += 1
-            elif age < self.STALE_THRESHOLD:
-                stale += 1
-            else:
-                expired += 1
+        def count_by_freshness(cache: Dict) -> Dict[str, int]:
+            fresh = stale = expired = 0
+            for entry in cache.values():
+                age = (now - entry.timestamp).total_seconds()
+                if age < self.CACHE_TTL:
+                    fresh += 1
+                elif age < self.STALE_THRESHOLD:
+                    stale += 1
+                else:
+                    expired += 1
+            return {"fresh": fresh, "stale": stale, "expired": expired}
+        
+        token_stats = count_by_freshness(self._token_cache)
+        lp_stats = count_by_freshness(self._lp_cache)
         
         return {
-            "total_entries": len(self._cache),
-            "fresh": fresh,
-            "stale": stale,
-            "expired": expired,
+            "token_prices": {
+                "total": len(self._token_cache),
+                **token_stats
+            },
+            "lp_prices": {
+                "total": len(self._lp_cache),
+                **lp_stats
+            },
+            "decimals_cached": len(self._decimals_cache),
             "rate_limiter_tokens": self._rate_limiter.tokens,
         }
 
