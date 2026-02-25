@@ -735,3 +735,20 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+    # Close price service HTTP client
+    price_service = get_price_service()
+    await price_service.close()
+
+# Admin endpoint for cache stats
+@api_router.get("/admin/price-cache-stats")
+async def get_price_cache_stats(session: str = Depends(get_admin_session)):
+    """Get price service cache statistics (admin only)."""
+    price_service = get_price_service()
+    return price_service.get_cache_stats()
+
+@api_router.post("/admin/clear-price-cache")
+async def clear_price_cache(session: str = Depends(get_admin_session)):
+    """Clear price cache (admin only)."""
+    price_service = get_price_service()
+    price_service.clear_cache()
+    return {"success": True, "message": "Price cache cleared"}
