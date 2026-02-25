@@ -88,6 +88,20 @@ ERC20_ABI = [
 # Simple LP price cache (in production, use Redis or proper cache)
 lp_price_cache = {}
 
+def get_token_decimals(w3: Web3, token_address: str) -> int:
+    """Read decimals from ERC20 token contract."""
+    if not token_address or not w3.is_address(token_address):
+        return 18  # Default fallback
+    try:
+        contract = w3.eth.contract(
+            address=w3.to_checksum_address(token_address),
+            abi=ERC20_ABI
+        )
+        return contract.functions.decimals().call()
+    except Exception as e:
+        logger.warning(f"Failed to read decimals for {token_address}: {e}")
+        return 18  # Default fallback
+
 async def get_lp_price_usd(lp_address: str, chain_id: int) -> float:
     """
     Get LP token price in USD.
