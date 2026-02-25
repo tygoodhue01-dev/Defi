@@ -8,7 +8,6 @@ import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Loader2, ArrowDown, ArrowUp, Check, AlertCircle } from 'lucide-react';
 import { ERC20_ABI, VAULT_ABI } from '@/lib/contracts';
-import { formatFromWei, formatNumber } from '@/lib/utils';
 import { userActionApi } from '@/lib/api';
 
 export function VaultActions({ vault, onActionComplete }) {
@@ -16,9 +15,25 @@ export function VaultActions({ vault, onActionComplete }) {
   const [depositAmount, setDepositAmount] = useState('');
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [activeTab, setActiveTab] = useState('deposit');
+  const [decimals, setDecimals] = useState(18); // Default to 18
 
   const vaultAddress = vault.vaultAddress;
   const wantAddress = vault.wantAddress;
+
+  // Read LP token decimals
+  const { data: tokenDecimals } = useReadContract({
+    address: wantAddress,
+    abi: ERC20_ABI,
+    functionName: 'decimals',
+    query: { enabled: !!wantAddress },
+  });
+
+  // Update decimals when fetched
+  useEffect(() => {
+    if (tokenDecimals !== undefined) {
+      setDecimals(Number(tokenDecimals));
+    }
+  }, [tokenDecimals]);
 
   // Read LP token balance
   const { data: lpBalance, refetch: refetchLpBalance } = useReadContract({
@@ -26,7 +41,7 @@ export function VaultActions({ vault, onActionComplete }) {
     abi: ERC20_ABI,
     functionName: 'balanceOf',
     args: [address],
-    query: { enabled: !!address && isConnected },
+    query: { enabled: !!address && isConnected && !!wantAddress },
   });
 
   // Read vault share balance
@@ -35,7 +50,7 @@ export function VaultActions({ vault, onActionComplete }) {
     abi: VAULT_ABI,
     functionName: 'balanceOf',
     args: [address],
-    query: { enabled: !!address && isConnected },
+    query: { enabled: !!address && isConnected && !!vaultAddress },
   });
 
   // Read allowance
@@ -44,7 +59,7 @@ export function VaultActions({ vault, onActionComplete }) {
     abi: ERC20_ABI,
     functionName: 'allowance',
     args: [address, vaultAddress],
-    query: { enabled: !!address && isConnected },
+    query: { enabled: !!address && isConnected && !!wantAddress && !!vaultAddress },
   });
 
   // Write contracts
@@ -71,17 +86,17 @@ export function VaultActions({ vault, onActionComplete }) {
       toast.success('Deposit successful!');
       refetchLpBalance();
       refetchShareBalance();
-      setDepositAmount('');
       
       // Record user action
       userActionApi.recordAction({
         vaultId: vault.id,
         userAddress: address.toLowerCase(),
         actionType: 'deposit',
-        amount: parseUnits(depositAmount || '0', 18).toString(),
+        amount: parseUnits(depositAmount || '0', decimals).toString(),
         txHash: depositHash,
       }).catch(console.error);
       
+      setDepositAmount('');
       onActionComplete?.();
     }
   }, [isDepositSuccess, depositHash]);
@@ -92,17 +107,17 @@ export function VaultActions({ vault, onActionComplete }) {
       toast.success('Withdrawal successful!');
       refetchLpBalance();
       refetchShareBalance();
-      setWithdrawAmount('');
       
       // Record user action
       userActionApi.recordAction({
         vaultId: vault.id,
         userAddress: address.toLowerCase(),
         actionType: 'withdraw',
-        amount: parseUnits(withdrawAmount || '0', 18).toString(),
+        amount: parseUnits(withdrawAmount || '0', decimals).toString(),
         txHash: withdrawHash,
       }).catch(console.error);
       
+      setWithdrawAmount('');
       onActionComplete?.();
     }
   }, [isWithdrawSuccess, withdrawHash]);
@@ -110,7 +125,7 @@ export function VaultActions({ vault, onActionComplete }) {
   const needsApproval = () => {
     if (!depositAmount || !allowance) return false;
     try {
-      const amount = parseUnits(depositAmount, 18);
+      const amount = parseUnits(depositAmount, decimals);
       return allowance < amount;
     } catch {
       return false;
@@ -120,7 +135,7 @@ export function VaultActions({ vault, onActionComplete }) {
   const handleApprove = () => {
     if (!depositAmount) return;
     try {
-      const amount = parseUnits(depositAmount, 18);
+      const amount = parseUnits(depositAmount, decimals);
       approve({
         address: wantAddress,
         abi: ERC20_ABI,
@@ -135,7 +150,7 @@ export function VaultActions({ vault, onActionComplete }) {
   const handleDeposit = () => {
     if (!depositAmount) return;
     try {
-      const amount = parseUnits(depositAmount, 18);
+      const amount = parseUnits(depositAmount, decimals);
       deposit({
         address: vaultAddress,
         abi: VAULT_ABI,
@@ -150,7 +165,7 @@ export function VaultActions({ vault, onActionComplete }) {
   const handleWithdraw = () => {
     if (!withdrawAmount) return;
     try {
-      const amount = parseUnits(withdrawAmount, 18);
+      const amount = parseUnits(withdrawAmount, decimals);
       withdraw({
         address: vaultAddress,
         abi: VAULT_ABI,
@@ -164,18 +179,18 @@ export function VaultActions({ vault, onActionComplete }) {
 
   const setMaxDeposit = () => {
     if (lpBalance) {
-      setDepositAmount(formatUnits(lpBalance, 18));
+      setDepositAmount(formatUnits(lpBalance, decimals));
     }
   };
 
   const setMaxWithdraw = () => {
     if (shareBalance) {
-      setWithdrawAmount(formatUnits(shareBalance, 18));
+      setWithdrawAmount(formatUnits(shareBalance, decimals));
     }
   };
 
-  const formattedLpBalance = lpBalance ? formatFromWei(lpBalance.toString()) : '0';
-  const formattedShareBalance = shareBalance ? formatFromWei(shareBalance.toString()) : '0';
+  const formattedLpBalance = lpBalance ? formatUnits(lpBalance, decimals) : '0';
+  const formattedShareBalance = shareBalance ? formatUnits(shareBalance, decimals) : '0';
 
   if (!isConnected) {
     return (
@@ -217,7 +232,7 @@ export function VaultActions({ vault, onActionComplete }) {
                   className="text-primary hover:underline font-mono"
                   data-testid="max-deposit-btn"
                 >
-                  {formattedLpBalance} LP
+                  {parseFloat(formattedLpBalance).toFixed(6)} LP
                 </button>
               </div>
               <Input
@@ -277,7 +292,7 @@ export function VaultActions({ vault, onActionComplete }) {
                   className="text-primary hover:underline font-mono"
                   data-testid="max-withdraw-btn"
                 >
-                  {formattedShareBalance} shares
+                  {parseFloat(formattedShareBalance).toFixed(6)} shares
                 </button>
               </div>
               <Input
