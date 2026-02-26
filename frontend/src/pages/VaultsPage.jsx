@@ -39,28 +39,63 @@ export default function VaultsPage() {
   const [chainFilter, setChainFilter] = useState('all');
   const [statusFilter, setStatusFilter] = useState('all');
 
-  const fetchVaults = async () => {
-    try {
-      setLoading(true);
-      setError(null);
+const fetchVaults = async () => {
+  try {
+    setLoading(true);
+    setError(null);
 
-      const [data, tvl, apy] = await Promise.all([
-        vaultApi.getVaults(),
-        beefyApi.getTvl(),
-        beefyApi.getApy(),
-      ]);
+    // Don't let 1 failed request kill the whole page
+    const results = await Promise.allSettled([
+      vaultApi.getVaults(),
+      beefyApi.getTvl(),
+      beefyApi.getApy(),
+    ]);
 
-      const vaultList = normalizeVaults(data);
-      setVaults(vaultList);
-      setTvlData(tvl || {});
-      setApyData(apy || {});
-    } catch (e) {
-      console.error('Failed to fetch vaults:', e);
-      setError('Failed to load vaults. Please try again.');
-    } finally {
-      setLoading(false);
+    const vaultsResult = results[0];
+    const tvlResult = results[1];
+    const apyResult = results[2];
+
+    const vaultList =
+      vaultsResult.status === "fulfilled"
+        ? vaultsResult.value
+        : [];
+
+    const tvl =
+      tvlResult.status === "fulfilled"
+        ? tvlResult.value
+        : {};
+
+    const apy =
+      apyResult.status === "fulfilled"
+        ? apyResult.value
+        : {};
+
+    // Vaults are required
+    if (!Array.isArray(vaultList)) {
+      console.error("getVaults() did not return an array:", vaultList);
+      setVaults([]);
+      setError("Vaults API returned unexpected data.");
+      return;
     }
-  };
+
+    setVaults(vaultList);
+    setTvlData(tvl || {});
+    setApyData(apy || {});
+
+    // Optional: show a softer warning if Beefy fails
+    if (tvlResult.status === "rejected" || apyResult.status === "rejected") {
+      console.warn("Beefy data failed (TVL/APY). Vaults still loaded.", {
+        tvlError: tvlResult.status === "rejected" ? tvlResult.reason : null,
+        apyError: apyResult.status === "rejected" ? apyResult.reason : null,
+      });
+    }
+  } catch (e) {
+    console.error("Failed to fetch vaults:", e);
+    setError("Failed to load vaults. Please try again.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   useEffect(() => {
     fetchVaults();
