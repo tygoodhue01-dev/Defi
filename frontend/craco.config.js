@@ -42,34 +42,33 @@ const webpackConfig = {
       },
     },
   },
-  webpack: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
+webpack: {
+  alias: {
+    "@": path.resolve(__dirname, "src"),
 
-      // ✅ IMPORTANT: prevent CRA/Webpack from bundling MetaMask SDK (breaks build)
-      "@metamask/sdk": path.resolve(__dirname, "src/shims/empty.js"),
-    },
-    configure: (webpackConfig) => {
-      // Add ignored patterns to reduce watched directories
-      webpackConfig.watchOptions = {
-        ...webpackConfig.watchOptions,
-        ignored: [
-          "**/node_modules/**",
-          "**/.git/**",
-          "**/build/**",
-          "**/dist/**",
-          "**/coverage/**",
-          "**/public/**",
-        ],
-      };
-
-      // Add health check plugin to webpack if enabled
-      if (config.enableHealthCheck && healthPluginInstance) {
-        webpackConfig.plugins.push(healthPluginInstance);
-      }
-      return webpackConfig;
-    },
+    // ✅ Only stub MetaMask SDK in PRODUCTION builds (Vercel build),
+    // ✅ but allow it in dev so MetaMask extension can work locally.
+    ...(process.env.NODE_ENV === "production"
+      ? { "@metamask/sdk": path.resolve(__dirname, "src/shims/empty.js") }
+      : {}),
   },
+  configure: (webpackConfig) => {
+    // Add ignored patterns to reduce watched directories
+    webpackConfig.watchOptions = {
+      ...webpackConfig.watchOptions,
+      ignored: [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/build/**",
+        "**/dist/**",
+        "**/coverage/**",
+        "**/public/**",
+      ],
+    };
+
+    return webpackConfig;
+  },
+},
 };
 
 // Only add babel metadata plugin during dev server
