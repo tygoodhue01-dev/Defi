@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useChainId } from 'wagmi';
-import { Loader2, Search, Filter, RefreshCw, AlertCircle } from 'lucide-react';
+import { Loader2, Search, RefreshCw, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import {
   Select,
   SelectContent,
@@ -14,6 +13,20 @@ import {
 import { VaultCard } from '@/components/VaultCard';
 import { vaultApi, beefyApi } from '@/lib/api';
 import { chainNames } from '@/lib/wagmi';
+
+function normalizeVaults(data) {
+  if (Array.isArray(data)) return data;
+  if (!data || typeof data !== 'object') return [];
+  if (Array.isArray(data.vaults)) return data.vaults;
+  if (Array.isArray(data.data)) return data.data;
+  if (Array.isArray(data.items)) return data.items;
+  if (Array.isArray(data.results)) return data.results;
+  return [];
+}
+
+function safeLower(x) {
+  return (typeof x === 'string' ? x : '').toLowerCase();
+}
 
 export default function VaultsPage() {
   const chainId = useChainId();
@@ -30,14 +43,17 @@ export default function VaultsPage() {
     try {
       setLoading(true);
       setError(null);
+
       const [data, tvl, apy] = await Promise.all([
         vaultApi.getVaults(),
         beefyApi.getTvl(),
         beefyApi.getApy(),
       ]);
-      setVaults(data);
-      setTvlData(tvl);
-      setApyData(apy);
+
+      const vaultList = normalizeVaults(data);
+      setVaults(vaultList);
+      setTvlData(tvl || {});
+      setApyData(apy || {});
     } catch (e) {
       console.error('Failed to fetch vaults:', e);
       setError('Failed to load vaults. Please try again.');
@@ -50,32 +66,46 @@ export default function VaultsPage() {
     fetchVaults();
   }, []);
 
-  // Filter vaults
-  const filteredVaults = vaults.filter((vault) => {
-    const matchesSearch = 
-      vault.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vault.token0?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      vault.token1?.toLowerCase().includes(searchQuery.toLowerCase());
-    
-    const matchesChain = chainFilter === 'all' || vault.chainId === parseInt(chainFilter);
-    const matchesStatus = 
-      statusFilter === 'all' || 
-      (statusFilter === 'active' && !vault.paused) ||
-      (statusFilter === 'paused' && vault.paused);
-    
+  const filteredVaults = (Array.isArray(vaults) ? vaults : []).filter((vault) => {
+    const q = safeLower(searchQuery);
+
+    const matchesSearch =
+      q.length === 0 ||
+      safeLower(vault?.name).includes(q) ||
+      safeLower(vault?.token0).includes(q) ||
+      safeLower(vault?.token1).includes(q);
+
+    const vaultChainId =
+      typeof vault?.chainId === 'number' ? vault.chainId : parseInt(vault?.chainId, 10);
+
+    const matchesChain =
+      chainFilter === 'all' ||
+      (Number.isFinite(vaultChainId) && vaultChainId === parseInt(chainFilter, 10));
+
+    const paused = Boolean(vault?.paused);
+
+    const matchesStatus =
+      statusFilter === 'all' ||
+      (statusFilter === 'active' && !paused) ||
+      (statusFilter === 'paused' && paused);
+
     return matchesSearch && matchesChain && matchesStatus;
   });
 
-  // Calculate totals from Beefy-style TVL data
-  const totalTvl = Object.entries(tvlData)
+  // Calculate totals from Beefy-style TVL data (safe even if tvlData isn't perfect)
+  const totalTvl = Object.entries(tvlData || {})
     .filter(([k]) => k !== '_meta')
     .reduce((sum, [, v]) => sum + (v?.tvl || 0), 0);
+
+  const activeCount = (Array.isArray(vaults) ? vaults : []).filter((v) => !v?.paused).length;
 
   return (
     <div className="max-w-7xl mx-auto px-4 md:px-8 py-8 md:py-12">
       {/* Header */}
       <div className="mb-10">
-        <h1 className="text-4xl md:text-5xl font-bold mb-4" data-testid="vaults-title">Vaults</h1>
+        <h1 className="text-4xl md:text-5xl font-bold mb-4" data-testid="vaults-title">
+          Vaults
+        </h1>
         <p className="text-muted-foreground text-lg">
           Deposit your LP tokens and earn auto-compounding yield
         </p>
@@ -86,15 +116,20 @@ export default function VaultsPage() {
         <div className="p-6 rounded-xl bg-card border border-border">
           <p className="text-sm text-muted-foreground mb-1">Total Value Locked</p>
           <p className="text-3xl font-bold font-mono text-foreground" data-testid="total-tvl">
-            ${totalTvl.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            ${Number(totalTvl || 0).toLocaleString('en-US', { maximumFractionDigits: 0 })}
           </p>
         </div>
+
         <div className="p-6 rounded-xl bg-card border border-border">
           <p className="text-sm text-muted-foreground mb-1">Active Vaults</p>
-          <p className="text-3xl font-bold font-mono text-foreground" data-testid="active-vaults-count">
-            {vaults.filter(v => !v.paused).length}
+          <p
+            className="text-3xl font-bold font-mono text-foreground"
+            data-testid="active-vaults-count"
+          >
+            {activeCount}
           </p>
         </div>
+
         <div className="p-6 rounded-xl bg-card border border-border">
           <p className="text-sm text-muted-foreground mb-1">Your Network</p>
           <p className="text-3xl font-bold text-primary" data-testid="current-network">
@@ -116,7 +151,7 @@ export default function VaultsPage() {
             data-testid="vault-search-input"
           />
         </div>
-        
+
         <Select value={chainFilter} onValueChange={setChainFilter}>
           <SelectTrigger className="w-full md:w-[180px] h-11" data-testid="chain-filter">
             <SelectValue placeholder="All Chains" />
@@ -171,7 +206,7 @@ export default function VaultsPage() {
           </div>
           <h3 className="text-xl font-semibold mb-2">No Vaults Found</h3>
           <p className="text-muted-foreground max-w-md">
-            {vaults.length === 0 
+            {(Array.isArray(vaults) ? vaults.length : 0) === 0
               ? 'No vaults have been created yet. Check back later or create one in the admin panel.'
               : 'No vaults match your current filters. Try adjusting your search criteria.'}
           </p>
@@ -179,11 +214,11 @@ export default function VaultsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" data-testid="vaults-grid">
           {filteredVaults.map((vault) => (
-            <VaultCard 
-              key={vault.id} 
-              vault={vault} 
-              tvl={tvlData[vault.id]}
-              apy={apyData[vault.id]}
+            <VaultCard
+              key={vault?.id ?? `${vault?.name ?? 'vault'}-${vault?.chainId ?? 'na'}`}
+              vault={vault}
+              tvl={tvlData?.[vault?.id]}
+              apy={apyData?.[vault?.id]}
             />
           ))}
         </div>
